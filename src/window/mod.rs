@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use winit::window::Window as WinitWindow;
 
-#[derive(Default)]
 pub struct Window {
     window: Option<Arc<WinitWindow>>,
     is_focused: bool,
@@ -16,7 +15,7 @@ impl Window {
         }
     }
 
-    pub fn get_window(&mut self) -> Option<Arc<WinitWindow>> {
+    pub fn get_window(&self) -> Option<Arc<WinitWindow>> {
         self.window.clone()
     }
 

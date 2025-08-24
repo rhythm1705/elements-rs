@@ -1,27 +1,32 @@
 use std::sync::Arc;
 
-use tracing::info;
-use winit::event::WindowEvent;
-
 use crate::{
     input::Input, logger::Logger, renderer::Renderer, resource_manager::ResourceManager,
     window::Window,
 };
+use winit::event::WindowEvent;
+use winit::window::Window as WinitWindow;
 
 pub struct Application {
     resources: ResourceManager,
+    logger: Logger,
+    renderer: Renderer,
 }
 
 impl Application {
     pub fn new() -> Application {
         let mut resources = ResourceManager::new();
         resources.add(Input::new());
-        let mut _logger = Logger::new();
-        let mut _renderer = Renderer::new();
-        Application { resources }
+        let logger = Logger::new();
+        let renderer = Renderer::new();
+        Application {
+            resources,
+            logger,
+            renderer,
+        }
     }
 
-    pub fn set_window(&mut self, window: Option<Arc<winit::window::Window>>) {
+    pub fn set_window(&mut self, window: Option<Arc<WinitWindow>>) {
         let app_window = Window::new(window);
         self.resources.add(app_window);
     }
@@ -45,14 +50,19 @@ impl Application {
                 let input = self.resources.get_mut::<Input>();
                 input.handle_cursor(position);
             }
-            WindowEvent::RedrawRequested => {
-                let window = self.resources.get_mut::<Window>();
-                window.get_window().unwrap().request_redraw();
-                let input = self.resources.get_mut::<Input>();
-                input.prepare_for_next_frame();
-            }
             _ => (),
         }
+    }
+
+    pub fn run(&mut self) {
+        self.renderer.run(&self.resources);
+    }
+
+    pub fn on_update(&mut self) {
+        let window = self.resources.get_mut::<Window>();
+        window.get_window().unwrap().request_redraw();
+        let input = self.resources.get_mut::<Input>();
+        input.prepare_for_next_frame();
     }
 }
 

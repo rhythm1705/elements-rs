@@ -8,21 +8,50 @@ use vulkano::{
     swapchain::Surface,
 };
 
-use crate::resource_manager::ResourceManager;
+use crate::{resource_manager::ResourceManager, window::Window};
 
 pub struct Renderer {
-    instance: Arc<Instance>,
-    device: Arc<Device>,
-    queues: Vec<Arc<vulkano::device::Queue>>,
+    rcx: Option<RenderContext>,
 }
 
 impl Renderer {
     pub fn new() -> Renderer {
+        Renderer { rcx: None }
+    }
+
+    pub fn run(&mut self, resources: &ResourceManager) {
+        self.rcx = Some(RenderContext::new(resources));
+    }
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct RenderContext {
+    instance: Arc<Instance>,
+    device: Arc<Device>,
+    queues: Vec<Arc<vulkano::device::Queue>>,
+    surface: Option<Arc<Surface>>,
+}
+
+impl RenderContext {
+    fn new(resources: &ResourceManager) -> RenderContext {
+        let window = resources
+            .get::<Window>()
+            .get_window()
+            .expect("No window to draw");
+
         let vk_lib = VulkanLibrary::new().expect("no local Vulkan library/DLL");
+
+        let required_extensions = Surface::required_extensions(&window).unwrap();
         let instance = Instance::new(
             vk_lib,
             InstanceCreateInfo {
                 flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
+                enabled_extensions: required_extensions,
                 ..Default::default()
             },
         )
@@ -78,20 +107,16 @@ impl Renderer {
 
         let queues: Vec<Arc<vulkano::device::Queue>> = queues_iter.collect();
 
-        // let surface = Surface::from_window(instance.clone(), window.clone());
+        let surface = Some(
+            Surface::from_window(instance.clone(), window)
+                .expect("Failed to create surface from window"),
+        );
 
-        Renderer {
+        RenderContext {
             instance,
             device,
             queues,
+            surface,
         }
-    }
-
-    pub fn run() {}
-}
-
-impl Default for Renderer {
-    fn default() -> Self {
-        Self::new()
     }
 }
