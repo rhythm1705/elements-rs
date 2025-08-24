@@ -1,12 +1,21 @@
 use tracing::info;
 
-use crate::{logging_system::LoggingManager, window_manager::WindowManager};
+use crate::{
+    application::Application,
+    platform::{Platform, platform_winit::WinitPlatform},
+};
 
-pub mod logging_system;
-pub mod window_manager;
+pub mod application;
+pub mod input;
+pub mod logger;
+pub mod platform;
+pub mod renderer;
+pub mod resource_manager;
+pub mod window;
 
 fn main() {
-    LoggingManager::new();
-    WindowManager::new();
+    let app = Application::new();
+    let platform = WinitPlatform::new(app);
     info!("HELLO ELEMENTS!");
+    platform.run();
 }

@@ -1,9 +1,9 @@
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
-pub struct LoggingManager {}
+pub struct Logger {}
 
-impl LoggingManager {
+impl Logger {
     pub fn new() -> Self {
         let subscriber = FmtSubscriber::builder()
             // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
@@ -22,7 +22,7 @@ impl LoggingManager {
     // fn on_update(&self) {}
 }
 
-impl Default for LoggingManager {
+impl Default for Logger {
     fn default() -> Self {
         Self::new()
     }
