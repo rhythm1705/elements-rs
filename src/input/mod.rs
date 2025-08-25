@@ -2,18 +2,18 @@ use std::collections::HashSet;
 
 use tracing::info;
 use winit::{
-    dpi::{PhysicalPosition, Position},
+    dpi::PhysicalPosition,
     event::{DeviceId, ElementState, KeyEvent, MouseButton},
     keyboard::PhysicalKey,
 };
 
 #[derive(Default)]
 pub struct Input {
-    pub keys_pressed: HashSet<PhysicalKey>,
-    pub keys_just_pressed: HashSet<PhysicalKey>,
-    pub keys_just_released: HashSet<PhysicalKey>,
-    pub mouse_buttons_pressed: HashSet<MouseButton>,
-    pub mouse_pos: (f64, f64),
+    keys_pressed: HashSet<PhysicalKey>,
+    keys_just_pressed: HashSet<PhysicalKey>,
+    keys_just_released: HashSet<PhysicalKey>,
+    mouse_buttons_pressed: HashSet<MouseButton>,
+    mouse_pos: (f64, f64),
 }
 
 impl Input {

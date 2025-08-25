@@ -15,9 +15,9 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Application {
+        let mut logger = Logger::new();
         let mut resources = ResourceManager::new();
         resources.add(Input::new());
-        let logger = Logger::new();
         let renderer = Renderer::new();
         Application {
             resources,
@@ -34,7 +34,11 @@ impl Application {
     pub fn handle_window_event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::Focused(is_focused) => {
-                self.resources.get_mut::<Window>().set_focued(is_focused);
+                self.resources.get_mut::<Window>().set_focused(is_focused);
+            }
+            WindowEvent::Resized(new_size) => {
+                let window = self.resources.get_mut::<Window>();
+                window.set_size(new_size.width, new_size.height);
             }
             WindowEvent::KeyboardInput {
                 device_id, event, ..
@@ -59,6 +63,7 @@ impl Application {
     }
 
     pub fn on_update(&mut self) {
+        self.renderer.on_update(&mut self.resources);
         let window = self.resources.get_mut::<Window>();
         window.get_window().unwrap().request_redraw();
         let input = self.resources.get_mut::<Input>();

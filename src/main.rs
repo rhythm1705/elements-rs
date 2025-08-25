@@ -16,6 +16,6 @@ pub mod window;
 fn main() {
     let app = Application::new();
     let platform = WinitPlatform::new(app);
-    info!("HELLO ELEMENTS!");
     platform.run();
+    info!("HELLO ELEMENTS!");
 }
