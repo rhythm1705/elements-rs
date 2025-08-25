@@ -2,6 +2,7 @@
 name = "elements"
 version = "0.1.0"
 edition = "2024"
+authors = ["Rhythm Goel <rhythm1705@outlook.com>"]
 
 [dependencies]
 tracing = "0.1.41"
