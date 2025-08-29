@@ -1,4 +1,4 @@
-use tracing::error;
+use tracing::{error, info};
 
 use crate::{
     renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager, window::Window,
@@ -41,8 +41,10 @@ impl Renderer {
 
     pub fn on_update(&mut self, resources: &mut ResourceManager) {
         let window = resources.get::<Window>();
-        if let Some(vk) = &mut self.vk_renderer {
-            vk.draw_frame(window);
+        if let Some(vk) = &mut self.vk_renderer
+            && let Err(e) = vk.draw_frame(window)
+        {
+            error!("Error during draw frame: {}", e);
         }
     }
 }

@@ -1,24 +1,56 @@
 use std::{error::Error, sync::Arc};
 
-use tracing::info;
+use tracing::{error, info};
 use vulkano::{
-    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer}, command_buffer::{allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents}, device::{
-        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags
-    }, image::{view::ImageView, Image, ImageUsage}, instance::{Instance, InstanceCreateFlags, InstanceCreateInfo}, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator}, pipeline::{
+    Validated, VulkanError, VulkanLibrary,
+    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo,
+        SubpassContents, allocator::StandardCommandBufferAllocator,
+    },
+    device::{
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDeviceType,
+    },
+    format::Format,
+    image::{Image, ImageUsage, view::ImageView},
+    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::{
+        DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         graphics::{
-            color_blend::{ColorBlendAttachmentState, ColorBlendState}, input_assembly::InputAssemblyState, multisample::MultisampleState, rasterization::RasterizationState, vertex_input::{Vertex, VertexDefinition}, viewport::{Viewport, ViewportState}, GraphicsPipelineCreateInfo
-        }, layout::PipelineDescriptorSetLayoutCreateInfo, DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo
-    }, render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass}, swapchain::{acquire_next_image, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo}, sync::{self, GpuFuture}, Validated, VulkanError, VulkanLibrary
+            GraphicsPipelineCreateInfo,
+            color_blend::{ColorBlendAttachmentState, ColorBlendState},
+            input_assembly::InputAssemblyState,
+            multisample::MultisampleState,
+            rasterization::RasterizationState,
+            vertex_input::{Vertex, VertexDefinition},
+            viewport::{Viewport, ViewportState},
+        },
+        layout::PipelineDescriptorSetLayoutCreateInfo,
+    },
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    swapchain::{
+        ColorSpace, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
+        acquire_next_image,
+    },
+    sync::{self, GpuFuture},
 };
 use winit::window::Window as WinitWindow;
 
 use crate::{resource_manager::ResourceManager, window::Window};
 
+use shaders::{fs, vs};
+
+mod pipeline;
+mod shaders;
+mod swapchain;
+
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
     instance: Arc<Instance>,
     device: Arc<Device>,
-    queues: Vec<Arc<Queue>>,
+    graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     vertex_buffer: Subbuffer<[MyVertex]>,
     render_context: Option<RenderContext>,
@@ -68,7 +100,8 @@ impl VulkanRenderer {
                     .enumerate()
                     .position(|(i, q)| {
                         q.queue_flags.intersects(QueueFlags::GRAPHICS)
-                            && p.presentation_support(i as u32, &winit_window).unwrap()
+                            && p.presentation_support(i as u32, &winit_window)
+                                .unwrap_or(false)
                     })
                     .map(|i| (p, i as u32))
             })
@@ -88,7 +121,7 @@ impl VulkanRenderer {
             physical_device.properties().device_type,
         );
 
-        let (device, queues_iter) = Device::new(
+        let (device, mut queues_iter) = Device::new(
             physical_device,
             DeviceCreateInfo {
                 enabled_extensions: device_extensions,
@@ -100,7 +133,7 @@ impl VulkanRenderer {
                 ..Default::default()
             },
         )?;
-        let queues: Vec<Arc<vulkano::device::Queue>> = queues_iter.collect();
+        let graphics_queue: Arc<Queue> = queues_iter.next().ok_or("No queue found")?;
 
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
@@ -138,7 +171,7 @@ impl VulkanRenderer {
             winit_window,
             instance,
             device,
-            queues,
+            graphics_queue,
             command_buffer_allocator,
             vertex_buffer,
             render_context: None,
@@ -161,70 +194,46 @@ impl VulkanRenderer {
                 .surface_capabilities(&surface, Default::default())?;
 
             // Choosing the internal format that the images will have.
-            let (image_format, _) = self
-                .device
-                .physical_device()
-                .surface_formats(&surface, Default::default())?[0];
+            let (image_format, _) = {
+                let formats = self
+                    .device
+                    .physical_device()
+                    .surface_formats(&surface, Default::default())?;
+                // Prefer sRGB non-linear formats
+                formats
+                    .iter()
+                    .find(|(f, c)| {
+                        f.ycbcr_chroma_sampling().is_none()
+                            && *f == Format::R8G8B8A8_SRGB
+                            && *c == ColorSpace::SrgbNonLinear
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| formats[0])
+            };
 
-            // Please take a look at the docs for the meaning of the parameters we didn't mention.
             Swapchain::new(
                 self.device.clone(),
                 surface,
                 SwapchainCreateInfo {
-                    // Some drivers report an `min_image_count` of 1, but fullscreen mode requires
-                    // at least 2. Therefore we must ensure the count is at least 2, otherwise the
-                    // program would crash when entering fullscreen mode on those drivers.
                     min_image_count: surface_capabilities.min_image_count.max(2),
-
                     image_format,
-
                     image_extent: window_size.into(),
-
                     image_usage: ImageUsage::COLOR_ATTACHMENT,
-
-                    // The alpha mode indicates how the alpha value of the final image will behave.
-                    // For example, you can choose whether the window will be
-                    // opaque or transparent.
+                    present_mode: surface_capabilities
+                        .compatible_present_modes
+                        .iter()
+                        .find(|m| **m == vulkano::swapchain::PresentMode::Mailbox)
+                        .copied()
+                        .unwrap_or(vulkano::swapchain::PresentMode::Fifo),
                     composite_alpha: surface_capabilities
                         .supported_composite_alpha
                         .into_iter()
                         .next()
                         .ok_or("No supported composite alpha")?,
-
                     ..Default::default()
                 },
             )?
         };
-
-        mod vs {
-            vulkano_shaders::shader! {
-                ty: "vertex",
-                src: r"
-                    #version 450
-
-                    layout(location = 0) in vec2 position;
-
-                    void main() {
-                        gl_Position = vec4(position, 0.0, 1.0);
-                    }
-                ",
-            }
-        }
-
-        mod fs {
-            vulkano_shaders::shader! {
-                ty: "fragment",
-                src: r"
-                    #version 450
-
-                    layout(location = 0) out vec4 f_color;
-
-                    void main() {
-                        f_color = vec4(1.0, 0.0, 0.0, 1.0);
-                    }
-                ",
-            }
-        }
 
         let render_pass = vulkano::single_pass_renderpass!(
             self.device.clone(),
@@ -325,16 +334,16 @@ impl VulkanRenderer {
         Ok(())
     }
 
-    pub fn draw_frame(&mut self, window: &Window) {
+    pub fn draw_frame(&mut self, window: &Window) -> Result<(), Box<dyn Error>> {
         if window.is_minimized() || window.get_width() == 0 || window.get_height() == 0 {
             info!("Window is minimized or has zero size, skipping draw frame");
-            return;
+            return Ok(());
         }
         let rcx = match self.render_context.as_mut() {
             Some(rcx) => rcx,
             None => {
-                info!("Render context not initialized, skipping draw frame");
-                return;
+                error!("Render context not initialized, skipping draw frame");
+                return Ok(());
             }
         };
         let window_size = self.winit_window.inner_size();
@@ -342,22 +351,19 @@ impl VulkanRenderer {
         // will keep accumulating and you will eventually reach an out of memory error.
         // Calling this function polls various fences in order to determine what the GPU
         // has already processed, and frees the resources that are no longer needed.
-        rcx.previous_frame_end.as_mut().unwrap().cleanup_finished();
+        rcx.previous_frame_end
+            .as_mut()
+            .ok_or("Previous frame could not be borrowed")?
+            .cleanup_finished();
 
         // Whenever the window resizes we need to recreate everything dependent on the
         // window size. In this example that includes the swapchain, the framebuffers and
         // the dynamic state viewport.
         if rcx.recreate_swapchain {
-            // Use the new dimensions of the window.
-
-            let (new_swapchain, new_images) = rcx
-                .swapchain
-                .recreate(SwapchainCreateInfo {
-                    image_extent: window_size.into(),
-                    ..rcx.swapchain.create_info()
-                })
-                .expect("failed to recreate swapchain");
-
+            let (new_swapchain, new_images) = rcx.swapchain.recreate(SwapchainCreateInfo {
+                image_extent: window_size.into(),
+                ..rcx.swapchain.create_info()
+            })?;
             rcx.swapchain = new_swapchain;
 
             // Because framebuffers contains a reference to the old swapchain, we need to
@@ -381,9 +387,12 @@ impl VulkanRenderer {
                 Ok(r) => r,
                 Err(VulkanError::OutOfDate) => {
                     rcx.recreate_swapchain = true;
-                    return;
+                    return Ok(());
                 }
-                Err(e) => panic!("failed to acquire next image: {e}"),
+                Err(e) => {
+                    error!("Failed to acquire next image: {e}");
+                    return Err(Box::new(e));
+                }
             };
 
         // `acquire_next_image` can be successful, but suboptimal. This means that the
@@ -405,10 +414,9 @@ impl VulkanRenderer {
         // command buffer will only be executable on that given queue family.
         let mut builder = AutoCommandBufferBuilder::primary(
             self.command_buffer_allocator.clone(),
-            self.queues[0].queue_family_index(),
+            self.graphics_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
+        )?;
 
         builder
             // Before we can draw, we have to *enter a render pass*.
@@ -433,37 +441,31 @@ impl VulkanRenderer {
                     contents: SubpassContents::Inline,
                     ..Default::default()
                 },
-            )
-            .unwrap()
+            )?
             // We are now inside the first subpass of the render pass.
             //
             // TODO: Document state setting and how it affects subsequent draw commands.
-            .set_viewport(0, [rcx.viewport.clone()].into_iter().collect())
-            .unwrap()
-            .bind_pipeline_graphics(rcx.pipeline.clone())
-            .unwrap()
-            .bind_vertex_buffers(0, self.vertex_buffer.clone())
-            .unwrap();
+            .set_viewport(0, [rcx.viewport.clone()].into_iter().collect())?
+            .bind_pipeline_graphics(rcx.pipeline.clone())?
+            .bind_vertex_buffers(0, self.vertex_buffer.clone())?;
 
         // We add a draw command.
-        unsafe { builder.draw(self.vertex_buffer.len() as u32, 1, 0, 0) }.unwrap();
+        unsafe { builder.draw(self.vertex_buffer.len() as u32, 1, 0, 0) }?;
 
         builder
             // We leave the render pass. Note that if we had multiple subpasses we could
             // have called `next_subpass` to jump to the next subpass.
-            .end_render_pass(Default::default())
-            .unwrap();
+            .end_render_pass(Default::default())?;
 
         // Finish recording the command buffer by calling `end`.
-        let command_buffer = builder.build().unwrap();
+        let command_buffer = builder.build()?;
 
         let future = rcx
             .previous_frame_end
             .take()
-            .unwrap()
+            .ok_or("Previous frame could not be taken")?
             .join(acquire_future)
-            .then_execute(self.queues[0].clone(), command_buffer)
-            .unwrap()
+            .then_execute(self.graphics_queue.clone(), command_buffer)?
             // The color output is now expected to contain our triangle. But in order to
             // show it on the screen, we have to *present* the image by calling
             // `then_swapchain_present`.
@@ -473,7 +475,7 @@ impl VulkanRenderer {
             // only be presented once the GPU has finished executing the command buffer
             // that draws the triangle.
             .then_swapchain_present(
-                self.queues[0].clone(),
+                self.graphics_queue.clone(),
                 SwapchainPresentInfo::swapchain_image_index(rcx.swapchain.clone(), image_index),
             )
             .then_signal_fence_and_flush();
@@ -481,13 +483,15 @@ impl VulkanRenderer {
         match future.map_err(Validated::unwrap) {
             Ok(future) => {
                 rcx.previous_frame_end = Some(future.boxed());
+                Ok(())
             }
             Err(VulkanError::OutOfDate) => {
                 rcx.recreate_swapchain = true;
                 rcx.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+                Ok(())
             }
             Err(e) => {
-                panic!("failed to flush future: {e}");
+                Err(Box::new(e))
                 // previous_frame_end = Some(sync::now(device.clone()).boxed());
             }
         }

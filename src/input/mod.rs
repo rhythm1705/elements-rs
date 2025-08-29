@@ -21,13 +21,11 @@ impl Input {
         Input::default()
     }
 
-    // This is crucial! Call this at the start of every frame to clear the "just" pressed/released states.
     pub fn prepare_for_next_frame(&mut self) {
         self.keys_just_pressed.clear();
         self.keys_just_released.clear();
     }
 
-    // Helper functions to make querying input easy
     pub fn is_key_pressed(&self, key: PhysicalKey) -> bool {
         self.keys_pressed.contains(&key)
     }

@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use std::thread::sleep;
 
 use crate::{
     input::Input, logger::Logger, renderer::Renderer, resource_manager::ResourceManager,
     window::Window,
 };
+use tracing::info;
 use winit::event::WindowEvent;
 use winit::window::Window as WinitWindow;
 
@@ -15,7 +17,7 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Application {
-        let mut logger = Logger::new();
+        let logger = Logger::new();
         let mut resources = ResourceManager::new();
         resources.add(Input::new());
         let renderer = Renderer::new();
@@ -63,11 +65,17 @@ impl Application {
     }
 
     pub fn on_update(&mut self) {
+        // calculate delta frame time here
+        let start_time = std::time::Instant::now();
         self.renderer.on_update(&mut self.resources);
         let window = self.resources.get_mut::<Window>();
         window.get_window().unwrap().request_redraw();
         let input = self.resources.get_mut::<Input>();
         input.prepare_for_next_frame();
+        sleep(std::time::Duration::from_millis(16)); // cap to ~60fps
+        let end_time = std::time::Instant::now();
+        let frame_duration = end_time.duration_since(start_time);
+        info!("Frame time: {} ms", frame_duration.as_millis());
     }
 }
 
