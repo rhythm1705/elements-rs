@@ -1,4 +1,4 @@
-use tracing::{error, info};
+use tracing::error;
 
 use crate::{
     renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager, window::Window,

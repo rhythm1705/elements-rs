@@ -12,11 +12,9 @@ use vulkano::{
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
         physical::PhysicalDeviceType,
     },
-    image::{Image, view::ImageView},
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::{vertex_input::Vertex, viewport::Viewport},
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
     swapchain::{Surface, SwapchainPresentInfo},
     sync::{self, GpuFuture},
 };

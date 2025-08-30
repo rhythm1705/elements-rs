@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::thread::sleep;
 
 use crate::{
     input::Input, logger::Logger, renderer::Renderer, resource_manager::ResourceManager,

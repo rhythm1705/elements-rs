@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Weak},
+    sync::Arc,
 };
 use vulkano::{
     image::{Image, view::ImageView},

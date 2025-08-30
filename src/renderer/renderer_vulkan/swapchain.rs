@@ -61,7 +61,7 @@ impl VulkanSwapchain {
                 SwapchainCreateInfo {
                     min_image_count: surface_capabilities.min_image_count.max(2),
                     image_format,
-                    image_extent: window_size.into(),
+                    image_extent: window_size,
                     image_usage: ImageUsage::COLOR_ATTACHMENT,
                     present_mode: surface_capabilities
                         .compatible_present_modes
