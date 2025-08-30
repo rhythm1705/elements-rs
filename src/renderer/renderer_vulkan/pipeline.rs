@@ -24,7 +24,7 @@ use crate::renderer::renderer_vulkan::{
     shaders::{fs, vs},
 };
 
-struct VulkanPipeline {
+pub struct VulkanPipeline {
     pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
 }

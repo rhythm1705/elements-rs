@@ -38,7 +38,11 @@ use vulkano::{
 };
 use winit::window::Window as WinitWindow;
 
-use crate::{resource_manager::ResourceManager, window::Window};
+use crate::{
+    renderer::renderer_vulkan::{pipeline::VulkanPipeline, swapchain::VulkanSwapchain},
+    resource_manager::ResourceManager,
+    window::Window,
+};
 
 use shaders::{fs, vs};
 
@@ -57,10 +61,9 @@ pub struct VulkanRenderer {
 }
 
 struct RenderContext {
-    swapchain: Arc<Swapchain>,
-    render_pass: Arc<RenderPass>,
+    swapchain: VulkanSwapchain,
+    pipeline: VulkanPipeline,
     framebuffers: Vec<Arc<Framebuffer>>,
-    pipeline: Arc<GraphicsPipeline>,
     viewport: Viewport,
     recreate_swapchain: bool,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
@@ -182,136 +185,12 @@ impl VulkanRenderer {
         let surface = Surface::from_window(self.instance.clone(), self.winit_window.clone())?;
         let window_size = self.winit_window.inner_size();
 
-        // Before we can draw on the surface, we have to create what is called a swapchain.
-        // Creating a swapchain allocates the color buffers that will contain the image that will
-        // ultimately be visible on the screen. These images are returned alongside the swapchain.
-        let (swapchain, images) = {
-            // Querying the capabilities of the surface. When we create the swapchain we can only
-            // pass values that are allowed by the capabilities.
-            let surface_capabilities = self
-                .device
-                .physical_device()
-                .surface_capabilities(&surface, Default::default())?;
+        let swapchain =
+            VulkanSwapchain::new(self.device.clone(), surface.clone(), window_size.into())?;
 
-            // Choosing the internal format that the images will have.
-            let (image_format, _) = {
-                let formats = self
-                    .device
-                    .physical_device()
-                    .surface_formats(&surface, Default::default())?;
-                // Prefer sRGB non-linear formats
-                formats
-                    .iter()
-                    .find(|(f, c)| {
-                        f.ycbcr_chroma_sampling().is_none()
-                            && *f == Format::R8G8B8A8_SRGB
-                            && *c == ColorSpace::SrgbNonLinear
-                    })
-                    .cloned()
-                    .unwrap_or_else(|| formats[0])
-            };
+        let pipeline = VulkanPipeline::new(self.device.clone(), swapchain.format)?;
 
-            Swapchain::new(
-                self.device.clone(),
-                surface,
-                SwapchainCreateInfo {
-                    min_image_count: surface_capabilities.min_image_count.max(2),
-                    image_format,
-                    image_extent: window_size.into(),
-                    image_usage: ImageUsage::COLOR_ATTACHMENT,
-                    present_mode: surface_capabilities
-                        .compatible_present_modes
-                        .iter()
-                        .find(|m| **m == vulkano::swapchain::PresentMode::Mailbox)
-                        .copied()
-                        .unwrap_or(vulkano::swapchain::PresentMode::Fifo),
-                    composite_alpha: surface_capabilities
-                        .supported_composite_alpha
-                        .into_iter()
-                        .next()
-                        .ok_or("No supported composite alpha")?,
-                    ..Default::default()
-                },
-            )?
-        };
-
-        let render_pass = vulkano::single_pass_renderpass!(
-            self.device.clone(),
-            attachments: {
-                color: {
-                    format: swapchain.image_format(),
-                    samples: 1,
-                    load_op: Clear,
-                    store_op: Store,
-                },
-            },
-            pass: {
-                color: [color],
-                depth_stencil: {},
-            },
-        )?;
-
-        let framebuffers = window_size_dependent_setup(&images, &render_pass);
-
-        let pipeline = {
-            let vs = vs::load(self.device.clone())?
-                .entry_point("main")
-                .ok_or("No main entry point in vertex shader")?;
-            let fs = fs::load(self.device.clone())?
-                .entry_point("main")
-                .ok_or("No main entry point in fragment shader")?;
-
-            let vertex_input_state = MyVertex::per_vertex().definition(&vs)?;
-
-            let stages = [
-                PipelineShaderStageCreateInfo::new(vs),
-                PipelineShaderStageCreateInfo::new(fs),
-            ];
-
-            let layout = PipelineLayout::new(
-                self.device.clone(),
-                PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
-                    .into_pipeline_layout_create_info(self.device.clone())?,
-            )?;
-
-            let subpass = Subpass::from(render_pass.clone(), 0).ok_or("No subpass 0")?;
-
-            // Finally, create the pipeline.
-            GraphicsPipeline::new(
-                self.device.clone(),
-                None,
-                GraphicsPipelineCreateInfo {
-                    stages: stages.into_iter().collect(),
-                    // How vertex data is read from the vertex buffers into the vertex shader.
-                    vertex_input_state: Some(vertex_input_state),
-                    // How vertices are arranged into primitive shapes. The default primitive shape
-                    // is a triangle.
-                    input_assembly_state: Some(InputAssemblyState::default()),
-                    // How primitives are transformed and clipped to fit the framebuffer. We use a
-                    // resizable viewport, set to draw over the entire window.
-                    viewport_state: Some(ViewportState::default()),
-                    // How polygons are culled and converted into a raster of pixels. The default
-                    // value does not perform any culling.
-                    rasterization_state: Some(RasterizationState::default()),
-                    // How multiple fragment shader samples are converted to a single pixel value.
-                    // The default value does not perform any multisampling.
-                    multisample_state: Some(MultisampleState::default()),
-                    // How pixel values are combined with the values already present in the
-                    // framebuffer. The default value overwrites the old value with the new one,
-                    // without any blending.
-                    color_blend_state: Some(ColorBlendState::with_attachment_states(
-                        subpass.num_color_attachments(),
-                        ColorBlendAttachmentState::default(),
-                    )),
-                    // Dynamic states allows us to specify parts of the pipeline settings when
-                    // recording the command buffer, before we perform drawing. Here, we specify
-                    // that the viewport should be dynamic.
-                    dynamic_state: [DynamicState::Viewport].into_iter().collect(),
-                    subpass: Some(subpass.into()),
-                    ..GraphicsPipelineCreateInfo::layout(layout)
-                },
-            )?
-        };
+        let framebuffers = window_size_dependent_setup(&swapchain.images, &pipeline.render_pass());
 
         let viewport = Viewport {
             offset: [0.0, 0.0],
@@ -324,9 +203,8 @@ impl VulkanRenderer {
 
         self.render_context = Some(RenderContext {
             swapchain,
-            render_pass,
-            framebuffers,
             pipeline,
+            framebuffers,
             viewport,
             recreate_swapchain,
             previous_frame_end,
@@ -360,15 +238,12 @@ impl VulkanRenderer {
         // window size. In this example that includes the swapchain, the framebuffers and
         // the dynamic state viewport.
         if rcx.recreate_swapchain {
-            let (new_swapchain, new_images) = rcx.swapchain.recreate(SwapchainCreateInfo {
-                image_extent: window_size.into(),
-                ..rcx.swapchain.create_info()
-            })?;
-            rcx.swapchain = new_swapchain;
+            rcx.swapchain.recreate(window_size.into())?;
 
             // Because framebuffers contains a reference to the old swapchain, we need to
             // recreate framebuffers as well.
-            rcx.framebuffers = window_size_dependent_setup(&new_images, &rcx.render_pass);
+            rcx.framebuffers =
+                window_size_dependent_setup(&rcx.swapchain.images, &rcx.pipeline.render_pass());
 
             rcx.viewport.extent = window_size.into();
 
@@ -382,18 +257,21 @@ impl VulkanRenderer {
         //
         // This function can block if no image is available. The parameter is an optional
         // timeout after which the function call will return an error.
-        let (image_index, suboptimal, acquire_future) =
-            match acquire_next_image(rcx.swapchain.clone(), None).map_err(Validated::unwrap) {
-                Ok(r) => r,
-                Err(VulkanError::OutOfDate) => {
-                    rcx.recreate_swapchain = true;
-                    return Ok(());
-                }
-                Err(e) => {
-                    error!("Failed to acquire next image: {e}");
-                    return Err(Box::new(e));
-                }
-            };
+        let (image_index, suboptimal, acquire_future) = match rcx
+            .swapchain
+            .acquire_next_image()
+            .map_err(Validated::unwrap)
+        {
+            Ok(r) => r,
+            Err(VulkanError::OutOfDate) => {
+                rcx.recreate_swapchain = true;
+                return Ok(());
+            }
+            Err(e) => {
+                error!("Failed to acquire next image: {e}");
+                return Err(Box::new(e));
+            }
+        };
 
         // `acquire_next_image` can be successful, but suboptimal. This means that the
         // swapchain image will still work, but it may not display correctly. With some
@@ -446,7 +324,7 @@ impl VulkanRenderer {
             //
             // TODO: Document state setting and how it affects subsequent draw commands.
             .set_viewport(0, [rcx.viewport.clone()].into_iter().collect())?
-            .bind_pipeline_graphics(rcx.pipeline.clone())?
+            .bind_pipeline_graphics(rcx.pipeline.pipeline())?
             .bind_vertex_buffers(0, self.vertex_buffer.clone())?;
 
         // We add a draw command.
@@ -476,7 +354,10 @@ impl VulkanRenderer {
             // that draws the triangle.
             .then_swapchain_present(
                 self.graphics_queue.clone(),
-                SwapchainPresentInfo::swapchain_image_index(rcx.swapchain.clone(), image_index),
+                SwapchainPresentInfo::swapchain_image_index(
+                    rcx.swapchain.swapchain.clone(),
+                    image_index,
+                ),
             )
             .then_signal_fence_and_flush();
 

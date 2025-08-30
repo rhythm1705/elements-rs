@@ -72,7 +72,6 @@ impl Application {
         window.get_window().unwrap().request_redraw();
         let input = self.resources.get_mut::<Input>();
         input.prepare_for_next_frame();
-        sleep(std::time::Duration::from_millis(16)); // cap to ~60fps
         let end_time = std::time::Instant::now();
         let frame_duration = end_time.duration_since(start_time);
         info!("Frame time: {} ms", frame_duration.as_millis());

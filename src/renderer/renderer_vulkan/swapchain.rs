@@ -19,21 +19,20 @@ struct SwapchainSupportDetails {
     present_modes: Vec<PresentMode>,
 }
 
-struct VulkanSwapchain {
-    swapchain: Arc<Swapchain>,
+pub struct VulkanSwapchain {
+    pub swapchain: Arc<Swapchain>,
     // support_details: SwapchainSupportDetails,
-    images: Vec<Arc<Image>>,
-    format: Format,
-    extent: [u32; 2],
+    pub images: Vec<Arc<Image>>,
+    pub format: Format,
+    pub extent: [u32; 2],
 }
 
 impl VulkanSwapchain {
     pub fn new(
         device: Arc<Device>,
         surface: Arc<Surface>,
-        window: &WinitWindow,
+        window_size: [u32; 2],
     ) -> Result<Self, Box<dyn Error>> {
-        let window_size = window.inner_size();
         let (swapchain, images) = {
             // Querying the capabilities of the surface. When we create the swapchain we can only
             // pass values that are allowed by the capabilities.
@@ -106,7 +105,7 @@ impl VulkanSwapchain {
 
     pub fn acquire_next_image(
         &self,
-    ) -> Result<(u32, bool, SwapchainAcquireFuture), Box<dyn Error>> {
+    ) -> Result<(u32, bool, SwapchainAcquireFuture), Validated<VulkanError>> {
         Ok(acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap)?)
     }
 
