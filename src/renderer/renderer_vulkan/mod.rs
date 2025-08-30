@@ -12,41 +12,26 @@ use vulkano::{
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
         physical::PhysicalDeviceType,
     },
-    format::Format,
-    image::{Image, ImageUsage, view::ImageView},
+    image::{Image, view::ImageView},
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::{
-        DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
-        graphics::{
-            GraphicsPipelineCreateInfo,
-            color_blend::{ColorBlendAttachmentState, ColorBlendState},
-            input_assembly::InputAssemblyState,
-            multisample::MultisampleState,
-            rasterization::RasterizationState,
-            vertex_input::{Vertex, VertexDefinition},
-            viewport::{Viewport, ViewportState},
-        },
-        layout::PipelineDescriptorSetLayoutCreateInfo,
-    },
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
-    swapchain::{
-        ColorSpace, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
-        acquire_next_image,
-    },
+    pipeline::graphics::{vertex_input::Vertex, viewport::Viewport},
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
+    swapchain::{Surface, SwapchainPresentInfo},
     sync::{self, GpuFuture},
 };
 use winit::window::Window as WinitWindow;
 
 use crate::{
-    renderer::renderer_vulkan::{pipeline::VulkanPipeline, swapchain::VulkanSwapchain},
+    renderer::renderer_vulkan::{
+        pipeline::VulkanPipeline, render_targets::RenderTargets, swapchain::VulkanSwapchain,
+    },
     resource_manager::ResourceManager,
     window::Window,
 };
 
-use shaders::{fs, vs};
-
 mod pipeline;
+mod render_targets;
 mod shaders;
 mod swapchain;
 
@@ -63,7 +48,7 @@ pub struct VulkanRenderer {
 struct RenderContext {
     swapchain: VulkanSwapchain,
     pipeline: VulkanPipeline,
-    framebuffers: Vec<Arc<Framebuffer>>,
+    render_targets: RenderTargets,
     viewport: Viewport,
     recreate_swapchain: bool,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
@@ -190,7 +175,9 @@ impl VulkanRenderer {
 
         let pipeline = VulkanPipeline::new(self.device.clone(), swapchain.format)?;
 
-        let framebuffers = window_size_dependent_setup(&swapchain.images, &pipeline.render_pass());
+        let mut render_targets = RenderTargets::new(swapchain.images.clone());
+
+        render_targets.rebuild_for_pass(0, &pipeline.render_pass())?;
 
         let viewport = Viewport {
             offset: [0.0, 0.0],
@@ -204,7 +191,7 @@ impl VulkanRenderer {
         self.render_context = Some(RenderContext {
             swapchain,
             pipeline,
-            framebuffers,
+            render_targets,
             viewport,
             recreate_swapchain,
             previous_frame_end,
@@ -242,8 +229,10 @@ impl VulkanRenderer {
 
             // Because framebuffers contains a reference to the old swapchain, we need to
             // recreate framebuffers as well.
-            rcx.framebuffers =
-                window_size_dependent_setup(&rcx.swapchain.images, &rcx.pipeline.render_pass());
+            rcx.render_targets
+                .replace_images(rcx.swapchain.images.clone());
+            rcx.render_targets
+                .rebuild_for_pass(0, &rcx.pipeline.render_pass())?;
 
             rcx.viewport.extent = window_size.into();
 
@@ -309,7 +298,11 @@ impl VulkanRenderer {
                     clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
 
                     ..RenderPassBeginInfo::framebuffer(
-                        rcx.framebuffers[image_index as usize].clone(),
+                        rcx.render_targets
+                            .framebuffers(0)
+                            .ok_or("No framebuffers for render pass 0")?
+                            [image_index as usize]
+                            .clone(),
                     )
                 },
                 SubpassBeginInfo {
@@ -386,26 +379,4 @@ impl VulkanRenderer {
 struct MyVertex {
     #[format(R32G32_SFLOAT)]
     position: [f32; 2],
-}
-
-/// This function is called once during initialization, then again whenever the window is resized.
-fn window_size_dependent_setup(
-    images: &[Arc<Image>],
-    render_pass: &Arc<RenderPass>,
-) -> Vec<Arc<Framebuffer>> {
-    images
-        .iter()
-        .map(|image| {
-            let view = ImageView::new_default(image.clone()).unwrap();
-
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![view],
-                    ..Default::default()
-                },
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>()
 }

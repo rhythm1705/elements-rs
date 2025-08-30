@@ -1,6 +1,5 @@
 use std::{error::Error, sync::Arc};
 
-use tracing::error;
 use vulkano::{
     Validated, VulkanError,
     device::Device,
@@ -11,7 +10,6 @@ use vulkano::{
         SwapchainCreateInfo, acquire_next_image,
     },
 };
-use winit::window::Window as WinitWindow;
 
 struct SwapchainSupportDetails {
     capabilities: SurfaceCapabilities,

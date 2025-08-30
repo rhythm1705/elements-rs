@@ -16,7 +16,7 @@ use vulkano::{
         },
         layout::PipelineDescriptorSetLayoutCreateInfo,
     },
-    render_pass::{Framebuffer, RenderPass, Subpass},
+    render_pass::{RenderPass, Subpass},
 };
 
 use crate::renderer::renderer_vulkan::{
