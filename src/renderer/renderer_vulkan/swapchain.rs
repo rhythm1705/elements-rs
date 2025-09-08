@@ -1,5 +1,6 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
+use anyhow::{Result, anyhow};
 use vulkano::{
     Validated, VulkanError,
     device::Device,
@@ -26,11 +27,7 @@ pub struct VulkanSwapchain {
 }
 
 impl VulkanSwapchain {
-    pub fn new(
-        device: Arc<Device>,
-        surface: Arc<Surface>,
-        window_size: [u32; 2],
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new(device: Arc<Device>, surface: Arc<Surface>, window_size: [u32; 2]) -> Result<Self> {
         let (swapchain, images) = {
             // Querying the capabilities of the surface. When we create the swapchain we can only
             // pass values that are allowed by the capabilities.
@@ -73,7 +70,7 @@ impl VulkanSwapchain {
                         .supported_composite_alpha
                         .into_iter()
                         .next()
-                        .ok_or("No supported composite alpha")?,
+                        .ok_or(anyhow!("No supported composite alpha"))?,
                     ..Default::default()
                 },
             )?
@@ -90,7 +87,7 @@ impl VulkanSwapchain {
         })
     }
 
-    pub fn recreate(&mut self, window_size: [u32; 2]) -> Result<(), Box<dyn Error>> {
+    pub fn recreate(&mut self, window_size: [u32; 2]) -> Result<()> {
         let (new_swapchain, new_images) = self.swapchain.recreate(SwapchainCreateInfo {
             image_extent: window_size,
             ..self.swapchain.create_info()

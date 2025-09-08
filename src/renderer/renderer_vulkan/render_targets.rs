@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
+
+use anyhow::{Error, Result};
 use vulkano::{
     image::{Image, view::ImageView},
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
@@ -25,13 +24,13 @@ impl RenderTargets {
         &mut self,
         pass_key: usize,
         render_pass: &Arc<RenderPass>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let fbs = self
             .images
             .iter()
             .map(|img| {
                 let view = ImageView::new_default(img.clone())?;
-                Ok::<Arc<Framebuffer>, Box<dyn std::error::Error>>(Framebuffer::new(
+                Ok::<Arc<Framebuffer>, Error>(Framebuffer::new(
                     render_pass.clone(),
                     FramebufferCreateInfo {
                         attachments: vec![view],
@@ -39,7 +38,7 @@ impl RenderTargets {
                     },
                 )?)
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>>>()?;
         self.framebuffers.insert(pass_key, fbs);
         Ok(())
     }

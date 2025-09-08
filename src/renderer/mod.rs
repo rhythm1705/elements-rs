@@ -34,7 +34,7 @@ impl Renderer {
         };
 
         if let Err(e) = init_result {
-            error!("Failed to initialize render context: {}", e);
+            error!("Failed to initialize render context: {:?}", e);
             self.vk_renderer = None;
         }
     }

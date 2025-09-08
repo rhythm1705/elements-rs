@@ -16,7 +16,7 @@ impl Window {
         let is_minimized;
         if let Some(w) = &winit_window {
             size = w.inner_size();
-            is_minimized = w.is_minimized()
+            is_minimized = w.is_minimized();
         } else {
             size = winit::dpi::PhysicalSize::new(0, 0);
             is_minimized = Some(false);

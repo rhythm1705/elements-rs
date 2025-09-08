@@ -1,5 +1,6 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
+use anyhow::{Result, anyhow};
 use vulkano::{
     device::Device,
     format::Format,
@@ -10,7 +11,7 @@ use vulkano::{
             color_blend::{ColorBlendAttachmentState, ColorBlendState},
             input_assembly::InputAssemblyState,
             multisample::MultisampleState,
-            rasterization::RasterizationState,
+            rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState},
             vertex_input::{Vertex, VertexDefinition},
             viewport::ViewportState,
         },
@@ -30,7 +31,7 @@ pub struct VulkanPipeline {
 }
 
 impl VulkanPipeline {
-    pub fn new(device: Arc<Device>, format: Format) -> Result<Self, Box<dyn Error>> {
+    pub fn new(device: Arc<Device>, format: Format) -> Result<Self> {
         let render_pass = vulkano::single_pass_renderpass!(
             device.clone(),
             attachments: {
@@ -50,10 +51,10 @@ impl VulkanPipeline {
         let pipeline = {
             let vs = vs::load(device.clone())?
                 .entry_point("main")
-                .ok_or("No main entry point in vertex shader")?;
+                .ok_or(anyhow!("No main entry point in vertex shader"))?;
             let fs = fs::load(device.clone())?
                 .entry_point("main")
-                .ok_or("No main entry point in fragment shader")?;
+                .ok_or(anyhow!("No main entry point in fragment shader"))?;
 
             let vertex_input_state = MyVertex::per_vertex().definition(&vs)?;
 
@@ -62,13 +63,22 @@ impl VulkanPipeline {
                 PipelineShaderStageCreateInfo::new(fs),
             ];
 
+            let rasterization_state = RasterizationState {
+                polygon_mode: PolygonMode::Fill,
+                line_width: 1.0,
+                cull_mode: CullMode::Back,
+                front_face: FrontFace::Clockwise,
+                ..RasterizationState::default()
+            };
+
             let layout = PipelineLayout::new(
                 device.clone(),
                 PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
                     .into_pipeline_layout_create_info(device.clone())?,
             )?;
 
-            let subpass = Subpass::from(render_pass.clone(), 0).ok_or("No subpass 0")?;
+            let subpass = Subpass::from(render_pass.clone(), 0)
+                .ok_or_else(|| anyhow!("Subpass 0 not found"))?;
 
             // Finally, create the pipeline.
             GraphicsPipeline::new(
@@ -86,7 +96,7 @@ impl VulkanPipeline {
                     viewport_state: Some(ViewportState::default()),
                     // How polygons are culled and converted into a raster of pixels. The default
                     // value does not perform any culling.
-                    rasterization_state: Some(RasterizationState::default()),
+                    rasterization_state: Some(rasterization_state),
                     // How multiple fragment shader samples are converted to a single pixel value.
                     // The default value does not perform any multisampling.
                     multisample_state: Some(MultisampleState::default()),

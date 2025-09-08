@@ -1,20 +1,27 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
+use anyhow::{Result, anyhow};
+use glam::{Vec2, Vec3};
 use tracing::{error, info};
 use vulkano::{
     Validated, VulkanError, VulkanLibrary,
-    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo,
-        SubpassContents, allocator::StandardCommandBufferAllocator,
+        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
+        RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
+        allocator::StandardCommandBufferAllocator,
     },
     device::{
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
         physical::PhysicalDeviceType,
     },
-    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::graphics::{vertex_input::Vertex, viewport::Viewport},
+    instance::{
+        Instance, InstanceCreateFlags, InstanceCreateInfo,
+        debug::{
+            DebugUtilsMessageSeverity, DebugUtilsMessenger, DebugUtilsMessengerCallback,
+            DebugUtilsMessengerCreateInfo,
+        },
+    },
+    pipeline::graphics::viewport::Viewport,
     swapchain::{Surface, SwapchainPresentInfo},
     sync::{self, GpuFuture},
 };
@@ -22,24 +29,50 @@ use winit::window::Window as WinitWindow;
 
 use crate::{
     renderer::renderer_vulkan::{
-        pipeline::VulkanPipeline, render_targets::RenderTargets, swapchain::VulkanSwapchain,
+        buffers::{MyVertex, RenderMesh, VulkanAllocator},
+        pipeline::VulkanPipeline,
+        render_targets::RenderTargets,
+        swapchain::VulkanSwapchain,
     },
     resource_manager::ResourceManager,
     window::Window,
 };
 
+mod buffers;
 mod pipeline;
 mod render_targets;
 mod shaders;
 mod swapchain;
 
+const VERTICES: [MyVertex; 4] = [
+    MyVertex {
+        position: Vec2::new(-0.5, -0.5),
+        color: Vec3::new(1.0, 0.0, 0.0),
+    },
+    MyVertex {
+        position: Vec2::new(0.5, -0.5),
+        color: Vec3::new(0.0, 1.0, 0.0),
+    },
+    MyVertex {
+        position: Vec2::new(0.5, 0.5),
+        color: Vec3::new(0.0, 0.0, 1.0),
+    },
+    MyVertex {
+        position: Vec2::new(-0.5, 0.5),
+        color: Vec3::new(1.0, 1.0, 1.0),
+    },
+];
+
+const INDICES: [u32; 6] = [0, 1, 2, 2, 3, 0];
+
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
     instance: Arc<Instance>,
+    debug_callback: Option<DebugUtilsMessenger>,
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    vertex_buffer: Subbuffer<[MyVertex]>,
+    allocator: VulkanAllocator,
     render_context: Option<RenderContext>,
 }
 
@@ -53,24 +86,66 @@ struct RenderContext {
 }
 
 impl VulkanRenderer {
-    pub fn new(resources: &ResourceManager) -> Result<VulkanRenderer, Box<dyn Error>> {
+    pub fn new(resources: &ResourceManager) -> Result<VulkanRenderer> {
         let winit_window = resources
             .get::<Window>()
             .get_window()
-            .ok_or("No window found")?;
+            .ok_or_else(|| anyhow!("No window found"))?;
 
         let vk_lib = VulkanLibrary::new()?;
 
+        let layers = vec!["VK_LAYER_KHRONOS_validation".to_owned()];
         let required_extensions = Surface::required_extensions(&winit_window)?;
         let instance = Instance::new(
             vk_lib,
             InstanceCreateInfo {
+                enabled_layers: layers,
                 flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
                 enabled_extensions: required_extensions,
                 ..Default::default()
             },
+        )?;
+
+        let debug_callback = DebugUtilsMessenger::new(
+            instance.clone(),
+            DebugUtilsMessengerCreateInfo::user_callback(unsafe {
+                DebugUtilsMessengerCallback::new(|message_severity, message_type, callback_data| {
+                    match message_severity {
+                        DebugUtilsMessageSeverity::ERROR => {
+                            error!(
+                                "Vulkan Debug Callback - ERROR - {:?} - {:?}: {}",
+                                message_type, message_severity, callback_data.message
+                            );
+                        }
+                        DebugUtilsMessageSeverity::WARNING => {
+                            error!(
+                                "Vulkan Debug Callback - WARNING - {:?} - {:?}: {}",
+                                message_type, message_severity, callback_data.message
+                            );
+                        }
+                        DebugUtilsMessageSeverity::INFO => {
+                            info!(
+                                "Vulkan Debug Callback - INFO - {:?} - {:?}: {}",
+                                message_type, message_severity, callback_data.message
+                            );
+                        }
+                        DebugUtilsMessageSeverity::VERBOSE => {
+                            info!(
+                                "Vulkan Debug Callback - VERBOSE - {:?} - {:?}: {}",
+                                message_type, message_severity, callback_data.message
+                            );
+                        }
+                        _ => {
+                            info!(
+                                "Vulkan Debug Callback - UNKNOWN - {:?} - {:?}: {}",
+                                message_type, message_severity, callback_data.message
+                            );
+                        }
+                    }
+                })
+            }),
         )
-        .expect("Failed to create instance");
+        .ok();
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -99,7 +174,7 @@ impl VulkanRenderer {
                 PhysicalDeviceType::Other => 4,
                 _ => 5,
             })
-            .ok_or("No suitable physical device found")?;
+            .ok_or_else(|| anyhow!("No suitable physical device found"))?;
 
         info!(
             "Using device: {} (type: {:?})",
@@ -119,52 +194,39 @@ impl VulkanRenderer {
                 ..Default::default()
             },
         )?;
-        let graphics_queue: Arc<Queue> = queues_iter.next().ok_or("No queue found")?;
-
-        let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+        let graphics_queue: Arc<Queue> = queues_iter
+            .next()
+            .ok_or_else(|| anyhow!("No queue found"))?;
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
             Default::default(),
         ));
 
-        let vertices = [
-            MyVertex {
-                position: [-0.5, -0.25],
-            },
-            MyVertex {
-                position: [0.0, 0.5],
-            },
-            MyVertex {
-                position: [0.25, -0.1],
-            },
-        ];
-        let vertex_buffer = Buffer::from_iter(
-            memory_allocator,
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vertices,
-        )?;
+        let mut allocator = VulkanAllocator::new(
+            device.clone(),
+            graphics_queue.clone(),
+            command_buffer_allocator.clone(),
+        );
+
+        // Create local mutable copies instead of taking &mut of const items.
+        let mut verts = VERTICES;
+        let inds = INDICES;
+        allocator.create_mesh(&mut verts, &inds)?;
 
         Ok(VulkanRenderer {
             winit_window,
             instance,
+            debug_callback,
             device,
             graphics_queue,
             command_buffer_allocator,
-            vertex_buffer,
+            allocator,
             render_context: None,
         })
     }
 
-    pub fn initialize_render_context(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn initialize_render_context(&mut self) -> Result<()> {
         let surface = Surface::from_window(self.instance.clone(), self.winit_window.clone())?;
         let window_size = self.winit_window.inner_size();
 
@@ -197,7 +259,7 @@ impl VulkanRenderer {
         Ok(())
     }
 
-    pub fn draw_frame(&mut self, window: &Window) -> Result<(), Box<dyn Error>> {
+    pub fn draw_frame(&mut self, window: &Window) -> Result<()> {
         if window.is_minimized() || window.get_width() == 0 || window.get_height() == 0 {
             info!("Window is minimized or has zero size, skipping draw frame");
             return Ok(());
@@ -216,7 +278,7 @@ impl VulkanRenderer {
         // has already processed, and frees the resources that are no longer needed.
         rcx.previous_frame_end
             .as_mut()
-            .ok_or("Previous frame could not be borrowed")?
+            .ok_or_else(|| anyhow!("Previous frame could not be borrowed"))?
             .cleanup_finished();
 
         // Whenever the window resizes we need to recreate everything dependent on the
@@ -237,13 +299,6 @@ impl VulkanRenderer {
             rcx.recreate_swapchain = false;
         }
 
-        // Before we can draw on the output, we have to *acquire* an image from the
-        // swapchain. If no image is available (which happens if you submit draw commands
-        // too quickly), then the function will block. This operation returns the index of
-        // the image that we are allowed to draw upon.
-        //
-        // This function can block if no image is available. The parameter is an optional
-        // timeout after which the function call will return an error.
         let (image_index, suboptimal, acquire_future) = match rcx
             .swapchain
             .acquire_next_image()
@@ -256,93 +311,58 @@ impl VulkanRenderer {
             }
             Err(e) => {
                 error!("Failed to acquire next image: {e}");
-                return Err(Box::new(e));
+                return Err(anyhow!("Failed to acquire next image: {e}"));
             }
         };
 
-        // `acquire_next_image` can be successful, but suboptimal. This means that the
-        // swapchain image will still work, but it may not display correctly. With some
-        // drivers this can be when the window resizes, but it may not cause the swapchain
-        // to become out of date.
         if suboptimal {
             rcx.recreate_swapchain = true;
         }
 
-        // In order to draw, we have to record a *command buffer*. The command buffer
-        // object holds the list of commands that are going to be executed.
-        //
-        // Recording a command buffer is an expensive operation (usually a few hundred
-        // microseconds), but it is known to be a hot path in the driver and is expected to
-        // be optimized.
-        //
-        // Note that we have to pass a queue family when we create the command buffer. The
-        // command buffer will only be executable on that given queue family.
-        let mut builder = AutoCommandBufferBuilder::primary(
-            self.command_buffer_allocator.clone(),
-            self.graphics_queue.queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )?;
+        let mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> =
+            AutoCommandBufferBuilder::primary(
+                self.command_buffer_allocator.clone(),
+                self.graphics_queue.queue_family_index(),
+                CommandBufferUsage::OneTimeSubmit,
+            )?;
 
         builder
-            // Before we can draw, we have to *enter a render pass*.
             .begin_render_pass(
                 RenderPassBeginInfo {
-                    // A list of values to clear the attachments with. This list contains
-                    // one item for each attachment in the render pass. In this case, there
-                    // is only one attachment, and we clear it with a blue color.
-                    //
-                    // Only attachments that have `AttachmentLoadOp::Clear` are provided
-                    // with clear values, any others should use `None` as the clear value.
-                    clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
+                    clear_values: vec![Some([0.0, 0.0, 0.0, 1.0].into())],
 
                     ..RenderPassBeginInfo::framebuffer(
                         rcx.render_targets
                             .framebuffers(0)
-                            .ok_or("No framebuffers for render pass 0")?
+                            .ok_or_else(|| anyhow!("No framebuffers for render pass 0"))?
                             [image_index as usize]
                             .clone(),
                     )
                 },
                 SubpassBeginInfo {
-                    // The contents of the first (and only) subpass. This can be either
-                    // `Inline` or `SecondaryCommandBuffers`. The latter is a bit more
-                    // advanced and is not covered here.
                     contents: SubpassContents::Inline,
                     ..Default::default()
                 },
             )?
-            // We are now inside the first subpass of the render pass.
-            //
-            // TODO: Document state setting and how it affects subsequent draw commands.
             .set_viewport(0, [rcx.viewport.clone()].into_iter().collect())?
-            .bind_pipeline_graphics(rcx.pipeline.pipeline())?
-            .bind_vertex_buffers(0, self.vertex_buffer.clone())?;
+            .bind_pipeline_graphics(rcx.pipeline.pipeline())?;
 
-        // We add a draw command.
-        unsafe { builder.draw(self.vertex_buffer.len() as u32, 1, 0, 0) }?;
+        let mesh = self
+            .allocator
+            .get_mesh(0)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Mesh not found"))?;
+        rcx.draw_mesh(mesh, &mut builder)?;
 
-        builder
-            // We leave the render pass. Note that if we had multiple subpasses we could
-            // have called `next_subpass` to jump to the next subpass.
-            .end_render_pass(Default::default())?;
+        builder.end_render_pass(Default::default())?;
 
-        // Finish recording the command buffer by calling `end`.
         let command_buffer = builder.build()?;
 
         let future = rcx
             .previous_frame_end
             .take()
-            .ok_or("Previous frame could not be taken")?
+            .ok_or_else(|| anyhow!("Previous frame could not be taken"))?
             .join(acquire_future)
             .then_execute(self.graphics_queue.clone(), command_buffer)?
-            // The color output is now expected to contain our triangle. But in order to
-            // show it on the screen, we have to *present* the image by calling
-            // `then_swapchain_present`.
-            //
-            // This function does not actually present the image immediately. Instead it
-            // submits a present command at the end of the queue. This means that it will
-            // only be presented once the GPU has finished executing the command buffer
-            // that draws the triangle.
             .then_swapchain_present(
                 self.graphics_queue.clone(),
                 SwapchainPresentInfo::swapchain_image_index(
@@ -362,19 +382,23 @@ impl VulkanRenderer {
                 rcx.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
                 Ok(())
             }
-            Err(e) => {
-                Err(Box::new(e))
-                // previous_frame_end = Some(sync::now(device.clone()).boxed());
-            }
+            Err(e) => Err(e.into()),
         }
     }
 }
 
-// We use `#[repr(C)]` here to force rustc to use a defined layout for our data, as the default
-// representation has *no guarantees*.
-#[derive(BufferContents, Vertex)]
-#[repr(C)]
-struct MyVertex {
-    #[format(R32G32_SFLOAT)]
-    position: [f32; 2],
+impl RenderContext {
+    pub fn draw_mesh(
+        &mut self,
+        mesh: &RenderMesh,
+        cbb: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ) -> Result<()> {
+        cbb.bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
+            .bind_index_buffer(mesh.index_buffer.clone())?;
+        // We add a draw command.
+        unsafe {
+            cbb.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
+        };
+        Ok(())
+    }
 }

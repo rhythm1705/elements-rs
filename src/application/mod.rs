@@ -73,7 +73,7 @@ impl Application {
         input.prepare_for_next_frame();
         let end_time = std::time::Instant::now();
         let frame_duration = end_time.duration_since(start_time);
-        info!("Frame time: {} ms", frame_duration.as_millis());
+        // info!("Frame time: {} ms", frame_duration.as_millis());
     }
 }
 
