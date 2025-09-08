@@ -68,7 +68,7 @@ const INDICES: [u32; 6] = [0, 1, 2, 2, 3, 0];
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
     instance: Arc<Instance>,
-    debug_callback: Option<DebugUtilsMessenger>,
+    _debug_callback: Option<DebugUtilsMessenger>,
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
@@ -106,7 +106,7 @@ impl VulkanRenderer {
             },
         )?;
 
-        let debug_callback = DebugUtilsMessenger::new(
+        let _debug_callback = DebugUtilsMessenger::new(
             instance.clone(),
             DebugUtilsMessengerCreateInfo::user_callback(unsafe {
                 DebugUtilsMessengerCallback::new(|message_severity, message_type, callback_data| {
@@ -217,7 +217,7 @@ impl VulkanRenderer {
         Ok(VulkanRenderer {
             winit_window,
             instance,
-            debug_callback,
+            _debug_callback,
             device,
             graphics_queue,
             command_buffer_allocator,

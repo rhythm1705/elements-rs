@@ -18,6 +18,9 @@ use vulkano::{
 #[derive(BufferContents, Vertex, Clone, Copy)]
 #[repr(C)]
 pub struct MyVertex {
+    // Every field needs to explicitly state the desired shader input format
+    // The `name` attribute can be used to specify shader input names to match.
+    // By default the field-name is used.
     #[name("inPosition")]
     #[format(R32G32_SFLOAT)]
     pub position: Vec2,
