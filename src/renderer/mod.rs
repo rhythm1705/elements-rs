@@ -21,7 +21,7 @@ impl Renderer {
                 self.vk_renderer = Some(vk);
             }
             Err(e) => {
-                error!("Could not initialize vulkan renderer: {}", e);
+                error!("Could not initialize vulkan renderer: {:?}", e);
                 self.vk_renderer = None;
             }
         }

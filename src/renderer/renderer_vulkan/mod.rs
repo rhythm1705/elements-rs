@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use glam::{Vec2, Vec3};
 use tracing::{error, info};
 use vulkano::{
@@ -68,7 +68,7 @@ const INDICES: [u32; 6] = [0, 1, 2, 2, 3, 0];
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
     instance: Arc<Instance>,
-    _debug_callback: Option<DebugUtilsMessenger>,
+    _debug_callback: DebugUtilsMessenger,
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
@@ -90,12 +90,13 @@ impl VulkanRenderer {
         let winit_window = resources
             .get::<Window>()
             .get_window()
-            .ok_or_else(|| anyhow!("No window found"))?;
+            .with_context(|| "No window found")?;
 
         let vk_lib = VulkanLibrary::new()?;
 
         let layers = vec!["VK_LAYER_KHRONOS_validation".to_owned()];
-        let required_extensions = Surface::required_extensions(&winit_window)?;
+        let mut required_extensions = Surface::required_extensions(&winit_window)?;
+        required_extensions.ext_debug_utils = true;
         let instance = Instance::new(
             vk_lib,
             InstanceCreateInfo {
@@ -113,31 +114,31 @@ impl VulkanRenderer {
                     match message_severity {
                         DebugUtilsMessageSeverity::ERROR => {
                             error!(
-                                "Vulkan Debug Callback - ERROR - {:?} - {:?}: {}",
+                                "Vulkan Debug - ERROR - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
                         DebugUtilsMessageSeverity::WARNING => {
                             error!(
-                                "Vulkan Debug Callback - WARNING - {:?} - {:?}: {}",
+                                "Vulkan Debug - WARNING - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
                         DebugUtilsMessageSeverity::INFO => {
                             info!(
-                                "Vulkan Debug Callback - INFO - {:?} - {:?}: {}",
+                                "Vulkan Debug - INFO - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
                         DebugUtilsMessageSeverity::VERBOSE => {
                             info!(
-                                "Vulkan Debug Callback - VERBOSE - {:?} - {:?}: {}",
+                                "Vulkan Debug - VERBOSE - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
                         _ => {
                             info!(
-                                "Vulkan Debug Callback - UNKNOWN - {:?} - {:?}: {}",
+                                "Vulkan Debug - UNKNOWN - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
@@ -145,7 +146,7 @@ impl VulkanRenderer {
                 })
             }),
         )
-        .ok();
+        .with_context(|| "Failed to create debug callback")?;
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -174,7 +175,7 @@ impl VulkanRenderer {
                 PhysicalDeviceType::Other => 4,
                 _ => 5,
             })
-            .ok_or_else(|| anyhow!("No suitable physical device found"))?;
+            .with_context(|| "No suitable physical device found")?;
 
         info!(
             "Using device: {} (type: {:?})",
@@ -194,9 +195,7 @@ impl VulkanRenderer {
                 ..Default::default()
             },
         )?;
-        let graphics_queue: Arc<Queue> = queues_iter
-            .next()
-            .ok_or_else(|| anyhow!("No queue found"))?;
+        let graphics_queue: Arc<Queue> = queues_iter.next().with_context(|| "No queue found")?;
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
@@ -278,7 +277,7 @@ impl VulkanRenderer {
         // has already processed, and frees the resources that are no longer needed.
         rcx.previous_frame_end
             .as_mut()
-            .ok_or_else(|| anyhow!("Previous frame could not be borrowed"))?
+            .with_context(|| "Previous frame could not be borrowed")?
             .cleanup_finished();
 
         // Whenever the window resizes we need to recreate everything dependent on the
@@ -334,7 +333,7 @@ impl VulkanRenderer {
                     ..RenderPassBeginInfo::framebuffer(
                         rcx.render_targets
                             .framebuffers(0)
-                            .ok_or_else(|| anyhow!("No framebuffers for render pass 0"))?
+                            .with_context(|| "No framebuffers for render pass 0")?
                             [image_index as usize]
                             .clone(),
                     )
@@ -350,7 +349,7 @@ impl VulkanRenderer {
         let mesh = self
             .allocator
             .get_mesh(0)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Mesh not found"))?;
+            .with_context(|| "Mesh not found")?;
         rcx.draw_mesh(mesh, &mut builder)?;
 
         builder.end_render_pass(Default::default())?;
@@ -360,7 +359,7 @@ impl VulkanRenderer {
         let future = rcx
             .previous_frame_end
             .take()
-            .ok_or_else(|| anyhow!("Previous frame could not be taken"))?
+            .with_context(|| "Previous frame could not be taken")?
             .join(acquire_future)
             .then_execute(self.graphics_queue.clone(), command_buffer)?
             .then_swapchain_present(
