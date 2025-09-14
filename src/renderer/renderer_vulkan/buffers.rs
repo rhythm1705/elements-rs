@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use vulkano::{
     DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -9,11 +9,14 @@ use vulkano::{
         AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
         allocator::StandardCommandBufferAllocator,
     },
+    descriptor_set::{DescriptorSet, allocator::StandardDescriptorSetAllocator},
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
 };
+
+use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
 
 #[derive(BufferContents, Vertex, Clone, Copy)]
 #[repr(C)]
@@ -30,6 +33,14 @@ pub struct MyVertex {
     pub color: Vec3,
 }
 
+#[derive(BufferContents, Clone, Copy, Default)]
+#[repr(C)]
+pub struct UniformBufferObject {
+    pub model: Mat4,
+    pub view: Mat4,
+    pub proj: Mat4,
+}
+
 pub struct RenderMesh {
     pub vertex_buffer: Subbuffer<[MyVertex]>,
     pub index_buffer: Subbuffer<[u32]>,
@@ -37,23 +48,29 @@ pub struct RenderMesh {
     pub index_count: u32,
 }
 
-pub struct VulkanAllocator {
+pub struct VulkanResourceManager {
     memory_allocator: Arc<StandardMemoryAllocator>,
     meshes: Vec<RenderMesh>,
+    uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
+    pub descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
 
-impl VulkanAllocator {
+impl VulkanResourceManager {
     pub fn new(
         device: Arc<Device>,
         graphics_queue: Arc<Queue>,
         command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     ) -> Self {
-        let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device));
+        let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+        let descriptor_set_allocator =
+            StandardDescriptorSetAllocator::new(device.clone(), Default::default());
         Self {
             memory_allocator,
             meshes: Vec::new(),
+            uniform_buffers: Vec::new(),
+            descriptor_set_allocator: Arc::new(descriptor_set_allocator),
             graphics_queue,
             command_buffer_allocator,
         }
@@ -173,5 +190,28 @@ impl VulkanAllocator {
             .wait(None /* timeout */)?;
 
         Ok(index_buffer)
+    }
+
+    pub fn create_uniform_buffers(&mut self) -> Result<()> {
+        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+            let uniform_buffer = Buffer::new_sized::<UniformBufferObject>(
+                self.memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage: BufferUsage::UNIFORM_BUFFER,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                        | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                    ..Default::default()
+                },
+            )?;
+            self.uniform_buffers.push(uniform_buffer);
+        }
+        Ok(())
+    }
+
+    pub fn get_uniform_buffer(&self, index: usize) -> Option<Subbuffer<UniformBufferObject>> {
+        self.uniform_buffers.get(index).cloned()
     }
 }

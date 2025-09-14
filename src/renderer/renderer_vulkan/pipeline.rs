@@ -2,10 +2,17 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use vulkano::{
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator,
+        layout::{
+            DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
+            DescriptorType,
+        },
+    },
     device::Device,
     format::Format,
     pipeline::{
-        DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+        DynamicState, GraphicsPipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         graphics::{
             GraphicsPipelineCreateInfo,
             color_blend::{ColorBlendAttachmentState, ColorBlendState},
@@ -15,9 +22,10 @@ use vulkano::{
             vertex_input::{Vertex, VertexDefinition},
             viewport::ViewportState,
         },
-        layout::PipelineDescriptorSetLayoutCreateInfo,
+        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayoutCreateInfo},
     },
     render_pass::{RenderPass, Subpass},
+    shader::ShaderStages,
 };
 
 use crate::renderer::renderer_vulkan::{
@@ -67,14 +75,31 @@ impl VulkanPipeline {
                 polygon_mode: PolygonMode::Fill,
                 line_width: 1.0,
                 cull_mode: CullMode::Back,
-                front_face: FrontFace::Clockwise,
+                front_face: FrontFace::CounterClockwise,
                 ..RasterizationState::default()
             };
 
+            let mut descriptor_set_layout_binding =
+                DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer);
+
+            descriptor_set_layout_binding.stages = ShaderStages::VERTEX | ShaderStages::FRAGMENT;
+
+            let descriptor_set_layout = DescriptorSetLayout::new(
+                device.clone(),
+                DescriptorSetLayoutCreateInfo {
+                    bindings: vec![(0, descriptor_set_layout_binding)]
+                        .into_iter()
+                        .collect(),
+                    ..Default::default()
+                },
+            )?;
+
             let layout = PipelineLayout::new(
                 device.clone(),
-                PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
-                    .into_pipeline_layout_create_info(device.clone())?,
+                PipelineLayoutCreateInfo {
+                    set_layouts: vec![descriptor_set_layout],
+                    ..Default::default()
+                },
             )?;
 
             let subpass = Subpass::from(render_pass.clone(), 0)
@@ -129,5 +154,9 @@ impl VulkanPipeline {
 
     pub fn render_pass(&self) -> Arc<RenderPass> {
         self.render_pass.clone()
+    }
+
+    pub fn layout(&self) -> Arc<PipelineLayout> {
+        self.pipeline.layout().clone()
     }
 }

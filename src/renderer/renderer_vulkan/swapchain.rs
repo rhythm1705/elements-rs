@@ -12,6 +12,8 @@ use vulkano::{
     },
 };
 
+use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
+
 struct SwapchainSupportDetails {
     capabilities: SurfaceCapabilities,
     formats: Vec<Format>,
@@ -56,7 +58,9 @@ impl VulkanSwapchain {
                 device.clone(),
                 surface,
                 SwapchainCreateInfo {
-                    min_image_count: surface_capabilities.min_image_count.max(2),
+                    min_image_count: surface_capabilities
+                        .min_image_count
+                        .max(MAX_FRAMES_IN_FLIGHT as u32),
                     image_format,
                     image_extent: window_size,
                     image_usage: ImageUsage::COLOR_ATTACHMENT,

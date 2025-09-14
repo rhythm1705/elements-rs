@@ -1,15 +1,20 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{self, Instant},
+};
 
 use anyhow::{Context, Result, anyhow};
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use tracing::{error, info};
 use vulkano::{
     Validated, VulkanError, VulkanLibrary,
+    buffer::Subbuffer,
     command_buffer::{
         AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
         RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
         allocator::StandardCommandBufferAllocator,
     },
+    descriptor_set::{self, DescriptorSet, WriteDescriptorSet},
     device::{
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
         physical::PhysicalDeviceType,
@@ -21,7 +26,7 @@ use vulkano::{
             DebugUtilsMessengerCreateInfo,
         },
     },
-    pipeline::graphics::viewport::Viewport,
+    pipeline::{PipelineBindPoint, graphics::viewport::Viewport},
     swapchain::{Surface, SwapchainPresentInfo},
     sync::{self, GpuFuture},
 };
@@ -29,7 +34,7 @@ use winit::window::Window as WinitWindow;
 
 use crate::{
     renderer::renderer_vulkan::{
-        buffers::{MyVertex, RenderMesh, VulkanAllocator},
+        buffers::{MyVertex, RenderMesh, UniformBufferObject, VulkanResourceManager},
         pipeline::VulkanPipeline,
         render_targets::RenderTargets,
         swapchain::VulkanSwapchain,
@@ -43,6 +48,8 @@ mod pipeline;
 mod render_targets;
 mod shaders;
 mod swapchain;
+
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 const VERTICES: [MyVertex; 4] = [
     MyVertex {
@@ -72,7 +79,7 @@ pub struct VulkanRenderer {
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    allocator: VulkanAllocator,
+    resource_manager: VulkanResourceManager,
     render_context: Option<RenderContext>,
 }
 
@@ -81,8 +88,10 @@ struct RenderContext {
     pipeline: VulkanPipeline,
     render_targets: RenderTargets,
     viewport: Viewport,
+    descriptor_sets: Vec<Arc<DescriptorSet>>,
     recreate_swapchain: bool,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
+    start_time: Instant,
 }
 
 impl VulkanRenderer {
@@ -202,16 +211,11 @@ impl VulkanRenderer {
             Default::default(),
         ));
 
-        let mut allocator = VulkanAllocator::new(
+        let resource_manager = VulkanResourceManager::new(
             device.clone(),
             graphics_queue.clone(),
             command_buffer_allocator.clone(),
         );
-
-        // Create local mutable copies instead of taking &mut of const items.
-        let mut verts = VERTICES;
-        let inds = INDICES;
-        allocator.create_mesh(&mut verts, &inds)?;
 
         Ok(VulkanRenderer {
             winit_window,
@@ -220,7 +224,7 @@ impl VulkanRenderer {
             device,
             graphics_queue,
             command_buffer_allocator,
-            allocator,
+            resource_manager,
             render_context: None,
         })
     }
@@ -244,16 +248,43 @@ impl VulkanRenderer {
             depth_range: 0.0..=1.0,
         };
 
+        let mut verts = VERTICES;
+        let inds = INDICES;
+        self.resource_manager.create_mesh(&mut verts, &inds)?;
+
+        self.resource_manager.create_uniform_buffers()?;
+
+        let descriptor_sets = (0..MAX_FRAMES_IN_FLIGHT)
+            .map(|i| {
+                let set = DescriptorSet::new(
+                    self.resource_manager.descriptor_set_allocator.clone(),
+                    pipeline.layout().set_layouts()[0].clone(),
+                    [WriteDescriptorSet::buffer(
+                        0,
+                        self.resource_manager
+                            .get_uniform_buffer(i)
+                            .with_context(|| "Uniform buffer not found")?,
+                    )],
+                    [],
+                )?;
+                Ok::<Arc<DescriptorSet>, anyhow::Error>(set)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         let recreate_swapchain = false;
         let previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+
+        let start_time = Instant::now();
 
         self.render_context = Some(RenderContext {
             swapchain,
             pipeline,
             render_targets,
             viewport,
+            descriptor_sets,
             recreate_swapchain,
             previous_frame_end,
+            start_time,
         });
         Ok(())
     }
@@ -309,14 +340,22 @@ impl VulkanRenderer {
                 return Ok(());
             }
             Err(e) => {
-                error!("Failed to acquire next image: {e}");
-                return Err(anyhow!("Failed to acquire next image: {e}"));
+                panic!("Failed to acquire next image: {:?}", e);
+                // return Err(anyhow!("Failed to acquire next image: {:?}", e));
             }
         };
 
         if suboptimal {
             rcx.recreate_swapchain = true;
+            return Ok(());
         }
+
+        rcx.update_uniform_buffer(
+            self.resource_manager
+                .get_uniform_buffer(image_index as usize)
+                .with_context(|| "Uniform buffer not found")?,
+        )
+        .with_context(|| "Failed to update uniform buffer")?;
 
         let mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> =
             AutoCommandBufferBuilder::primary(
@@ -329,7 +368,6 @@ impl VulkanRenderer {
             .begin_render_pass(
                 RenderPassBeginInfo {
                     clear_values: vec![Some([0.0, 0.0, 0.0, 1.0].into())],
-
                     ..RenderPassBeginInfo::framebuffer(
                         rcx.render_targets
                             .framebuffers(0)
@@ -344,10 +382,17 @@ impl VulkanRenderer {
                 },
             )?
             .set_viewport(0, [rcx.viewport.clone()].into_iter().collect())?
-            .bind_pipeline_graphics(rcx.pipeline.pipeline())?;
+            .bind_pipeline_graphics(rcx.pipeline.pipeline())?
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                rcx.pipeline.layout(),
+                0,
+                rcx.descriptor_sets[image_index as usize].clone(),
+            )
+            .with_context(|| "Failed to bind descriptor sets")?;
 
         let mesh = self
-            .allocator
+            .resource_manager
             .get_mesh(0)
             .with_context(|| "Mesh not found")?;
         rcx.draw_mesh(mesh, &mut builder)?;
@@ -373,7 +418,8 @@ impl VulkanRenderer {
 
         match future.map_err(Validated::unwrap) {
             Ok(future) => {
-                rcx.previous_frame_end = Some(future.boxed());
+                future.wait(None)?;
+                rcx.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
                 Ok(())
             }
             Err(VulkanError::OutOfDate) => {
@@ -398,6 +444,29 @@ impl RenderContext {
         unsafe {
             cbb.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
         };
+        Ok(())
+    }
+
+    pub fn update_uniform_buffer(
+        &mut self,
+        ubo_buffer: Subbuffer<UniformBufferObject>,
+    ) -> Result<()> {
+        let current_time = Instant::now();
+        let elapsed = current_time.duration_since(self.start_time);
+
+        let mut ubo = UniformBufferObject {
+            model: Mat4::from_rotation_z(elapsed.as_secs_f32() * 90.0f32.to_radians()),
+            view: Mat4::look_at_rh(Vec3::new(2.0, 2.0, 2.0), Vec3::ZERO, Vec3::Z),
+            proj: Mat4::perspective_rh(
+                45.0f32.to_radians(),
+                self.viewport.extent[0] / self.viewport.extent[1],
+                0.1,
+                10.0,
+            ),
+        };
+        ubo.proj.y_axis.y *= -1.0; // Invert Y coordinate for Vulkan
+
+        *ubo_buffer.write()? = ubo;
         Ok(())
     }
 }

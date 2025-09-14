@@ -1,5 +1,3 @@
-use tracing::error;
-
 use crate::{
     renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager, window::Window,
 };
@@ -21,21 +19,18 @@ impl Renderer {
                 self.vk_renderer = Some(vk);
             }
             Err(e) => {
-                error!("Could not initialize vulkan renderer: {:?}", e);
-                self.vk_renderer = None;
+                panic!("Could not initialize vulkan renderer: {:?}", e);
             }
         }
 
         let init_result = if let Some(vk) = self.vk_renderer.as_mut() {
             vk.initialize_render_context()
         } else {
-            error!("Vulkan renderer not available; skipping render context initialization");
-            return;
+            panic!("Vulkan renderer not available; skipping render context initialization");
         };
 
         if let Err(e) = init_result {
-            error!("Failed to initialize render context: {:?}", e);
-            self.vk_renderer = None;
+            panic!("Failed to initialize render context: {:?}", e);
         }
     }
 
@@ -44,7 +39,7 @@ impl Renderer {
         if let Some(vk) = &mut self.vk_renderer
             && let Err(e) = vk.draw_frame(window)
         {
-            error!("Error during draw frame: {}", e);
+            panic!("Error during draw frame: {:?}", e);
         }
     }
 }
