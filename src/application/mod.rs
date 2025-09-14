@@ -4,25 +4,25 @@ use crate::{
     input::Input, logger::Logger, renderer::Renderer, resource_manager::ResourceManager,
     window::Window,
 };
-use tracing::info;
+use tracing::debug;
 use winit::event::WindowEvent;
 use winit::window::Window as WinitWindow;
 
 pub struct Application {
     resources: ResourceManager,
-    logger: Logger,
+    _logger: Logger,
     renderer: Renderer,
 }
 
 impl Application {
     pub fn new() -> Application {
-        let logger = Logger::new();
+        let _logger = Logger::new();
         let mut resources = ResourceManager::new();
         resources.add(Input::new());
         let renderer = Renderer::new();
         Application {
             resources,
-            logger,
+            _logger,
             renderer,
         }
     }
@@ -73,7 +73,7 @@ impl Application {
         input.prepare_for_next_frame();
         let end_time = std::time::Instant::now();
         let frame_duration = end_time.duration_since(start_time);
-        // info!("Frame time: {} ms", frame_duration.as_millis());
+        debug!("Frame time: {} ms", frame_duration.as_millis());
     }
 }
 

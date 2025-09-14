@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3};
 use vulkano::{
     DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -9,7 +9,7 @@ use vulkano::{
         AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
         allocator::StandardCommandBufferAllocator,
     },
-    descriptor_set::{DescriptorSet, allocator::StandardDescriptorSetAllocator},
+    descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::vertex_input::Vertex,

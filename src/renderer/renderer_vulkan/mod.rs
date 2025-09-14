@@ -1,9 +1,6 @@
-use std::{
-    sync::Arc,
-    time::{self, Instant},
-};
+use std::{sync::Arc, time::Instant};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use glam::{Mat4, Vec2, Vec3};
 use tracing::{error, info};
 use vulkano::{
@@ -14,7 +11,7 @@ use vulkano::{
         RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
         allocator::StandardCommandBufferAllocator,
     },
-    descriptor_set::{self, DescriptorSet, WriteDescriptorSet},
+    descriptor_set::{DescriptorSet, WriteDescriptorSet},
     device::{
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
         physical::PhysicalDeviceType,
@@ -90,7 +87,8 @@ struct RenderContext {
     viewport: Viewport,
     descriptor_sets: Vec<Arc<DescriptorSet>>,
     recreate_swapchain: bool,
-    previous_frame_end: Option<Box<dyn GpuFuture>>,
+    in_flight_futures: Vec<Option<Box<dyn GpuFuture>>>,
+    current_frame: usize,
     start_time: Instant,
 }
 
@@ -272,7 +270,9 @@ impl VulkanRenderer {
             .collect::<Result<Vec<_>>>()?;
 
         let recreate_swapchain = false;
-        let previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+        let in_flight_futures = (0..MAX_FRAMES_IN_FLIGHT)
+            .map(|_| Some(sync::now(self.device.clone()).boxed()))
+            .collect();
 
         let start_time = Instant::now();
 
@@ -283,7 +283,8 @@ impl VulkanRenderer {
             viewport,
             descriptor_sets,
             recreate_swapchain,
-            previous_frame_end,
+            in_flight_futures,
+            current_frame: 0,
             start_time,
         });
         Ok(())
@@ -306,7 +307,7 @@ impl VulkanRenderer {
         // will keep accumulating and you will eventually reach an out of memory error.
         // Calling this function polls various fences in order to determine what the GPU
         // has already processed, and frees the resources that are no longer needed.
-        rcx.previous_frame_end
+        rcx.in_flight_futures[rcx.current_frame]
             .as_mut()
             .with_context(|| "Previous frame could not be borrowed")?
             .cleanup_finished();
@@ -340,8 +341,7 @@ impl VulkanRenderer {
                 return Ok(());
             }
             Err(e) => {
-                panic!("Failed to acquire next image: {:?}", e);
-                // return Err(anyhow!("Failed to acquire next image: {:?}", e));
+                return Err(e.into());
             }
         };
 
@@ -401,8 +401,7 @@ impl VulkanRenderer {
 
         let command_buffer = builder.build()?;
 
-        let future = rcx
-            .previous_frame_end
+        let future = rcx.in_flight_futures[rcx.current_frame]
             .take()
             .with_context(|| "Previous frame could not be taken")?
             .join(acquire_future)
@@ -419,16 +418,18 @@ impl VulkanRenderer {
         match future.map_err(Validated::unwrap) {
             Ok(future) => {
                 future.wait(None)?;
-                rcx.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
-                Ok(())
+                rcx.in_flight_futures[rcx.current_frame] = Some(future.boxed());
             }
             Err(VulkanError::OutOfDate) => {
                 rcx.recreate_swapchain = true;
-                rcx.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
-                Ok(())
+                rcx.in_flight_futures[rcx.current_frame] =
+                    Some(sync::now(self.device.clone()).boxed());
             }
-            Err(e) => Err(e.into()),
+            Err(e) => return Err(e.into()),
         }
+
+        rcx.current_frame = (rcx.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        Ok(())
     }
 }
 

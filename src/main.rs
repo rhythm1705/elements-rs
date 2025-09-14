@@ -17,5 +17,4 @@ fn main() {
     let app = Application::new();
     let platform = WinitPlatform::new(app);
     platform.run();
-    info!("HELLO ELEMENTS!");
 }

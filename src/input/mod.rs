@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tracing::info;
+use tracing::debug;
 use winit::{
     dpi::PhysicalPosition,
     event::{DeviceId, ElementState, KeyEvent, MouseButton},
@@ -36,7 +36,7 @@ impl Input {
 
     pub fn handle_keyboard_input(&mut self, device_id: DeviceId, event: KeyEvent) {
         let keycode = event.physical_key;
-        info!(
+        debug!(
             "Keyboard input from {:?} for key {:?} with state {:?}",
             device_id, keycode, event.state
         );
@@ -56,7 +56,7 @@ impl Input {
     }
 
     pub fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
-        info!("Mouse pressed {:?}", button);
+        debug!("Mouse pressed {:?}", button);
         match state {
             ElementState::Pressed => {
                 self.mouse_buttons_pressed.insert(button);
@@ -68,7 +68,7 @@ impl Input {
     }
 
     pub fn handle_cursor(&mut self, position: PhysicalPosition<f64>) {
-        info!("Mouse position {:?}", position);
+        debug!("Mouse position {:?}", position);
         self.mouse_pos = (position.x, position.y);
     }
 }

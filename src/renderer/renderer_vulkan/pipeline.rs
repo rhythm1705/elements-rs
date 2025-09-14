@@ -2,12 +2,9 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use vulkano::{
-    descriptor_set::{
-        allocator::StandardDescriptorSetAllocator,
-        layout::{
-            DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
-            DescriptorType,
-        },
+    descriptor_set::layout::{
+        DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
+        DescriptorType,
     },
     device::Device,
     format::Format,
@@ -22,7 +19,7 @@ use vulkano::{
             vertex_input::{Vertex, VertexDefinition},
             viewport::ViewportState,
         },
-        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayoutCreateInfo},
+        layout::PipelineLayoutCreateInfo,
     },
     render_pass::{RenderPass, Subpass},
     shader::ShaderStages,
