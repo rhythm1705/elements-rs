@@ -58,4 +58,10 @@ impl Window {
     pub fn get_height(&self) -> u32 {
         self.height
     }
+
+    pub fn set_title(&self, title: &str) {
+        if let Some(w) = &self.window {
+            w.set_title(title);
+        }
+    }
 }

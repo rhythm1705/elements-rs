@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec2, Vec3};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use vulkano::{
     Validated, VulkanError, VulkanLibrary,
     buffer::Subbuffer,
@@ -25,7 +25,7 @@ use vulkano::{
     },
     pipeline::{PipelineBindPoint, graphics::viewport::Viewport},
     swapchain::{Surface, SwapchainPresentInfo},
-    sync::{self, GpuFuture},
+    sync::{GpuFuture, future::FenceSignalFuture},
 };
 use winit::window::Window as WinitWindow;
 
@@ -87,7 +87,7 @@ struct RenderContext {
     viewport: Viewport,
     descriptor_sets: Vec<Arc<DescriptorSet>>,
     recreate_swapchain: bool,
-    in_flight_futures: Vec<Option<Box<dyn GpuFuture>>>,
+    in_flight_futures: Vec<Option<FenceSignalFuture<Box<dyn GpuFuture>>>>,
     current_frame: usize,
     start_time: Instant,
 }
@@ -138,7 +138,7 @@ impl VulkanRenderer {
                             );
                         }
                         DebugUtilsMessageSeverity::VERBOSE => {
-                            info!(
+                            debug!(
                                 "Vulkan Debug - VERBOSE - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
@@ -250,19 +250,19 @@ impl VulkanRenderer {
         let inds = INDICES;
         self.resource_manager.create_mesh(&mut verts, &inds)?;
 
-        self.resource_manager.create_uniform_buffers()?;
+        self.resource_manager
+            .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
 
         let descriptor_sets = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| {
+                let ubo = self
+                    .resource_manager
+                    .get_uniform_buffer(i)
+                    .with_context(|| format!("Uniform buffer {i} not found"))?;
                 let set = DescriptorSet::new(
                     self.resource_manager.descriptor_set_allocator.clone(),
                     pipeline.layout().set_layouts()[0].clone(),
-                    [WriteDescriptorSet::buffer(
-                        0,
-                        self.resource_manager
-                            .get_uniform_buffer(i)
-                            .with_context(|| "Uniform buffer not found")?,
-                    )],
+                    [WriteDescriptorSet::buffer(0, ubo)],
                     [],
                 )?;
                 Ok::<Arc<DescriptorSet>, anyhow::Error>(set)
@@ -270,9 +270,7 @@ impl VulkanRenderer {
             .collect::<Result<Vec<_>>>()?;
 
         let recreate_swapchain = false;
-        let in_flight_futures = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|_| Some(sync::now(self.device.clone()).boxed()))
-            .collect();
+        let in_flight_futures = (0..MAX_FRAMES_IN_FLIGHT).map(|_| None).collect();
 
         let start_time = Instant::now();
 
@@ -307,26 +305,21 @@ impl VulkanRenderer {
         // will keep accumulating and you will eventually reach an out of memory error.
         // Calling this function polls various fences in order to determine what the GPU
         // has already processed, and frees the resources that are no longer needed.
-        rcx.in_flight_futures[rcx.current_frame]
-            .as_mut()
-            .with_context(|| "Previous frame could not be borrowed")?
-            .cleanup_finished();
+        if let Some(fence_future) = rcx.in_flight_futures[rcx.current_frame].as_mut() {
+            fence_future.wait(None)?; // ensure safe reuse of this slot's UBO
+            fence_future.cleanup_finished();
+        }
 
         // Whenever the window resizes we need to recreate everything dependent on the
         // window size. In this example that includes the swapchain, the framebuffers and
         // the dynamic state viewport.
         if rcx.recreate_swapchain {
             rcx.swapchain.recreate(window_size.into())?;
-
-            // Because framebuffers contains a reference to the old swapchain, we need to
-            // recreate framebuffers as well.
             rcx.render_targets
                 .replace_images(rcx.swapchain.images.clone());
             rcx.render_targets
                 .rebuild_for_pass(0, &rcx.pipeline.render_pass())?;
-
             rcx.viewport.extent = window_size.into();
-
             rcx.recreate_swapchain = false;
         }
 
@@ -350,9 +343,11 @@ impl VulkanRenderer {
             return Ok(());
         }
 
+        // debug!("Acquired image index: {}", image_index);
+
         rcx.update_uniform_buffer(
             self.resource_manager
-                .get_uniform_buffer(image_index as usize)
+                .get_uniform_buffer(rcx.current_frame)
                 .with_context(|| "Uniform buffer not found")?,
         )
         .with_context(|| "Failed to update uniform buffer")?;
@@ -387,7 +382,7 @@ impl VulkanRenderer {
                 PipelineBindPoint::Graphics,
                 rcx.pipeline.layout(),
                 0,
-                rcx.descriptor_sets[image_index as usize].clone(),
+                rcx.descriptor_sets[rcx.current_frame].clone(),
             )
             .with_context(|| "Failed to bind descriptor sets")?;
 
@@ -401,10 +396,8 @@ impl VulkanRenderer {
 
         let command_buffer = builder.build()?;
 
-        let future = rcx.in_flight_futures[rcx.current_frame]
-            .take()
-            .with_context(|| "Previous frame could not be taken")?
-            .join(acquire_future)
+        // Build the future chain and obtain a fence future we can wait on next use of this slot.
+        let execution_future = acquire_future
             .then_execute(self.graphics_queue.clone(), command_buffer)?
             .then_swapchain_present(
                 self.graphics_queue.clone(),
@@ -413,17 +406,16 @@ impl VulkanRenderer {
                     image_index,
                 ),
             )
+            .boxed() // erase concrete type so we have a uniform storage type
             .then_signal_fence_and_flush();
 
-        match future.map_err(Validated::unwrap) {
+        match execution_future.map_err(Validated::unwrap) {
             Ok(future) => {
-                future.wait(None)?;
-                rcx.in_flight_futures[rcx.current_frame] = Some(future.boxed());
+                rcx.in_flight_futures[rcx.current_frame] = Some(future);
             }
             Err(VulkanError::OutOfDate) => {
                 rcx.recreate_swapchain = true;
-                rcx.in_flight_futures[rcx.current_frame] =
-                    Some(sync::now(self.device.clone()).boxed());
+                rcx.in_flight_futures[rcx.current_frame] = None;
             }
             Err(e) => return Err(e.into()),
         }

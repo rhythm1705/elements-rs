@@ -31,10 +31,7 @@ impl ResourceManager {
         self.resources
             .get(&type_id)
             .and_then(|boxed| boxed.downcast_ref::<T>())
-            .unwrap_or_else(|| {
-                error!("Resource of type {:?} not found", type_id);
-                panic!("Resource of type {:?} not found", type_id)
-            })
+            .unwrap_or_else(|| panic!("Resource of type {:?} not found", type_id))
     }
 
     pub fn get_mut<T: 'static>(&mut self) -> &mut T {

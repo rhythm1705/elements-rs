@@ -13,7 +13,7 @@ impl Renderer {
         Renderer { vk_renderer: None }
     }
 
-    pub fn run(&mut self, resources: &ResourceManager) {
+    pub fn run(&mut self, resources: &mut ResourceManager) {
         match VulkanRenderer::new(resources) {
             Ok(vk) => {
                 self.vk_renderer = Some(vk);

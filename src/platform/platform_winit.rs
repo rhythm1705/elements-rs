@@ -19,6 +19,12 @@ impl ApplicationHandler for WinitPlatform {
                 .create_window(WinitWindow::default_attributes())
                 .unwrap(),
         ));
+        if let Some(window) = &winit_window {
+            info!("Created window with ID: {:?}", window.id());
+            window.set_title("Elements");
+        } else {
+            info!("No window created.");
+        }
         self.app.set_window(winit_window);
         self.app.run();
     }

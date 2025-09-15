@@ -1,5 +1,3 @@
-use tracing::info;
-
 use crate::{
     application::Application,
     platform::{Platform, platform_winit::WinitPlatform},

@@ -8,7 +8,6 @@ use vulkano::{
 
 pub struct RenderTargets {
     images: Vec<Arc<Image>>,
-    // Cache: one framebuffer per image for each render pass
     framebuffers: HashMap<usize, Vec<Arc<Framebuffer>>>,
 }
 

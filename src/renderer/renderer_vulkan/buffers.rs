@@ -16,8 +16,6 @@ use vulkano::{
     sync::GpuFuture,
 };
 
-use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
-
 #[derive(BufferContents, Vertex, Clone, Copy)]
 #[repr(C)]
 pub struct MyVertex {
@@ -192,8 +190,12 @@ impl VulkanResourceManager {
         Ok(index_buffer)
     }
 
-    pub fn create_uniform_buffers(&mut self) -> Result<()> {
-        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+    pub fn create_uniform_buffers(&mut self, count: usize) -> Result<()> {
+        if self.uniform_buffers.len() == count {
+            return Ok(()); // Already sized correctly.
+        }
+        self.uniform_buffers.clear();
+        for _ in 0..count {
             let uniform_buffer = Buffer::new_sized::<UniformBufferObject>(
                 self.memory_allocator.clone(),
                 BufferCreateInfo {
