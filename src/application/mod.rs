@@ -27,7 +27,7 @@ impl Application {
         }
     }
 
-    pub fn set_window(&mut self, window: Option<Arc<WinitWindow>>) {
+    pub fn set_window(&mut self, window: Arc<WinitWindow>) {
         let app_window = Window::new(window);
         self.resources.add(app_window);
     }
@@ -68,14 +68,11 @@ impl Application {
     pub fn on_update(&mut self) {
         let start_time = std::time::Instant::now();
 
-        self.renderer.on_update(&mut self.resources);
+        self.renderer.on_update();
 
         {
-            // Limit borrow scope so we can re-borrow later
             let window = self.resources.get_mut::<Window>();
-            if let Some(w) = window.get_window() {
-                w.request_redraw();
-            }
+            window.get_winit_window().request_redraw();
         }
 
         let input = self.resources.get_mut::<Input>();

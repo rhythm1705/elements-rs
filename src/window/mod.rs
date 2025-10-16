@@ -3,7 +3,7 @@ use std::sync::Arc;
 use winit::window::Window as WinitWindow;
 
 pub struct Window {
-    window: Option<Arc<WinitWindow>>,
+    winit_window: Arc<WinitWindow>,
     is_focused: bool,
     is_minimized: Option<bool>,
     width: u32,
@@ -11,18 +11,11 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new(winit_window: Option<Arc<WinitWindow>>) -> Self {
-        let size;
-        let is_minimized;
-        if let Some(w) = &winit_window {
-            size = w.inner_size();
-            is_minimized = w.is_minimized();
-        } else {
-            size = winit::dpi::PhysicalSize::new(0, 0);
-            is_minimized = Some(false);
-        };
+    pub fn new(winit_window: Arc<WinitWindow>) -> Self {
+        let size = winit_window.inner_size();
+        let is_minimized = winit_window.is_minimized();
         Window {
-            window: winit_window,
+            winit_window,
             is_focused: false,
             is_minimized,
             width: size.width,
@@ -30,8 +23,8 @@ impl Window {
         }
     }
 
-    pub fn get_window(&self) -> Option<Arc<WinitWindow>> {
-        self.window.clone()
+    pub fn get_winit_window(&self) -> Arc<WinitWindow> {
+        self.winit_window.clone()
     }
 
     pub fn set_focused(&mut self, focused: bool) {
@@ -59,9 +52,11 @@ impl Window {
         self.height
     }
 
+    pub fn get_size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
     pub fn set_title(&self, title: &str) {
-        if let Some(w) = &self.window {
-            w.set_title(title);
-        }
+        self.winit_window.set_title(title);
     }
 }

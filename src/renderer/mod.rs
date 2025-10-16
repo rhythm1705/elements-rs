@@ -1,5 +1,5 @@
 use crate::{
-    renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager, window::Window,
+    renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager,
 };
 
 pub mod renderer_vulkan;
@@ -34,12 +34,10 @@ impl Renderer {
         }
     }
 
-    pub fn on_update(&mut self, resources: &mut ResourceManager) {
-        let window = resources.get::<Window>();
+    pub fn on_update(&mut self) {
         if let Some(vk) = &mut self.vk_renderer
-            && let Err(e) = vk.draw_frame(window)
         {
-            panic!("Error during draw frame: {:?}", e);
+            if let Ok(active_frame) = vk.begin_frame() {}
         }
     }
 }
