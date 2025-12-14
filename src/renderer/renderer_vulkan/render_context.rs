@@ -100,7 +100,6 @@ pub struct ActiveFrame<'a> {
     pub builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
     pub image_index: u32,
     pub acquire_future: Option<Box<dyn GpuFuture>>,
-    pub _finished: bool,
 }
 
 impl<'a> ActiveFrame<'a> {
