@@ -7,18 +7,19 @@ use vulkano::{
     format::Format,
     image::{Image, ImageUsage},
     swapchain::{
-        ColorSpace, PresentMode, Surface, SurfaceCapabilities, Swapchain, SwapchainAcquireFuture,
-        SwapchainCreateInfo, acquire_next_image,
+        ColorSpace, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
+        acquire_next_image,
     },
 };
 
 use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
 
-struct SwapchainSupportDetails {
-    capabilities: SurfaceCapabilities,
-    formats: Vec<Format>,
-    present_modes: Vec<PresentMode>,
-}
+// TODO: Implement querying swapchain support details
+// struct SwapchainSupportDetails {
+//     capabilities: SurfaceCapabilities,
+//     formats: Vec<Format>,
+//     present_modes: Vec<PresentMode>,
+// }
 
 pub struct VulkanSwapchain {
     pub swapchain: Arc<Swapchain>,
@@ -108,5 +109,6 @@ impl VulkanSwapchain {
         Ok(acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap)?)
     }
 
-    pub fn present(&self) {}
+    // TODO: Implement present function
+    // pub fn present(&self) {}
 }

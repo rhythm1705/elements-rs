@@ -14,17 +14,13 @@ pub struct WinitPlatform {
 
 impl ApplicationHandler for WinitPlatform {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let winit_window = Some(Arc::new(
+        let winit_window = Arc::new(
             event_loop
                 .create_window(WinitWindow::default_attributes())
                 .unwrap(),
-        ));
-        if let Some(window) = &winit_window {
-            info!("Created window with ID: {:?}", window.id());
-            window.set_title("Elements");
-        } else {
-            info!("No window created.");
-        }
+        );
+        info!("Created window with ID: {:?}", winit_window.id());
+        winit_window.set_title("Elements");
         self.app.set_window(winit_window);
         self.app.run();
     }

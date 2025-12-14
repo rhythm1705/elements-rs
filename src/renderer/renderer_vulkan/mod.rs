@@ -1,47 +1,45 @@
-use std::{sync::Arc, time::Instant};
-
-use anyhow::{Context, Result};
-use glam::{Mat4, Vec2, Vec3};
-use tracing::{debug, error, info};
-use vulkano::{
-    Validated, VulkanError, VulkanLibrary,
-    buffer::Subbuffer,
-    command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
-        RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
-        allocator::StandardCommandBufferAllocator,
-    },
-    descriptor_set::{DescriptorSet, WriteDescriptorSet},
-    device::{
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
-        physical::PhysicalDeviceType,
-    },
-    instance::{
-        Instance, InstanceCreateFlags, InstanceCreateInfo,
-        debug::{
-            DebugUtilsMessageSeverity, DebugUtilsMessenger, DebugUtilsMessengerCallback,
-            DebugUtilsMessengerCreateInfo,
-        },
-    },
-    pipeline::{PipelineBindPoint, graphics::viewport::Viewport},
-    swapchain::{Surface, SwapchainPresentInfo},
-    sync::{GpuFuture, future::FenceSignalFuture},
-};
-use winit::window::Window as WinitWindow;
-
-use crate::{
+use crate::renderer::renderer_vulkan::render_context::FrameState;
+pub(crate) use crate::{
     renderer::renderer_vulkan::{
-        buffers::{MyVertex, RenderMesh, UniformBufferObject, VulkanResourceManager},
+        buffers::{MyVertex, VulkanResourceManager},
         pipeline::VulkanPipeline,
+        render_context::{ActiveFrame, RenderContext},
         render_targets::RenderTargets,
         swapchain::VulkanSwapchain,
     },
     resource_manager::ResourceManager,
     window::Window,
 };
+use anyhow::{anyhow, Context, Result};
+use glam::{Vec2, Vec3};
+use std::{sync::Arc, time::Instant};
+#[cfg(debug_assertions)]
+use tracing::debug;
+use tracing::info;
+use vulkano::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo;
+#[cfg(debug_assertions)]
+use vulkano::instance::debug::{
+    DebugUtilsMessageSeverity, DebugUtilsMessenger, DebugUtilsMessengerCallback,
+    DebugUtilsMessengerCreateInfo,
+};
+use vulkano::{
+    command_buffer::allocator::StandardCommandBufferAllocator, descriptor_set::{DescriptorSet, WriteDescriptorSet}, device::{
+        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+        QueueFlags,
+    },
+    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    pipeline::graphics::viewport::Viewport,
+    swapchain::Surface,
+    sync::GpuFuture,
+    Validated,
+    VulkanError,
+    VulkanLibrary,
+};
+use winit::window::Window as WinitWindow;
 
 mod buffers;
 mod pipeline;
+mod render_context;
 mod render_targets;
 mod shaders;
 mod swapchain;
@@ -72,38 +70,32 @@ const INDICES: [u32; 6] = [0, 1, 2, 2, 3, 0];
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
     instance: Arc<Instance>,
+    #[cfg(debug_assertions)]
     _debug_callback: DebugUtilsMessenger,
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    resource_manager: VulkanResourceManager,
+    resources: VulkanResourceManager,
     render_context: Option<RenderContext>,
-}
-
-struct RenderContext {
-    swapchain: VulkanSwapchain,
-    pipeline: VulkanPipeline,
-    render_targets: RenderTargets,
-    viewport: Viewport,
-    descriptor_sets: Vec<Arc<DescriptorSet>>,
-    recreate_swapchain: bool,
-    in_flight_futures: Vec<Option<FenceSignalFuture<Box<dyn GpuFuture>>>>,
-    current_frame: usize,
-    start_time: Instant,
 }
 
 impl VulkanRenderer {
     pub fn new(resources: &ResourceManager) -> Result<VulkanRenderer> {
-        let winit_window = resources
-            .get::<Window>()
-            .get_window()
-            .with_context(|| "No window found")?;
+        let winit_window = resources.get::<Window>().get_winit_window();
 
         let vk_lib = VulkanLibrary::new()?;
 
-        let layers = vec!["VK_LAYER_KHRONOS_validation".to_owned()];
+        let enable_validation = cfg!(debug_assertions);
+
+        let layers = if enable_validation {
+            vec!["VK_LAYER_KHRONOS_validation".to_owned()]
+        } else {
+            Vec::new()
+        };
         let mut required_extensions = Surface::required_extensions(&winit_window)?;
-        required_extensions.ext_debug_utils = true;
+        if enable_validation {
+            required_extensions.ext_debug_utils = true;
+        }
         let instance = Instance::new(
             vk_lib,
             InstanceCreateInfo {
@@ -114,25 +106,26 @@ impl VulkanRenderer {
             },
         )?;
 
+        #[cfg(debug_assertions)]
         let _debug_callback = DebugUtilsMessenger::new(
             instance.clone(),
             DebugUtilsMessengerCreateInfo::user_callback(unsafe {
                 DebugUtilsMessengerCallback::new(|message_severity, message_type, callback_data| {
                     match message_severity {
                         DebugUtilsMessageSeverity::ERROR => {
-                            error!(
+                            debug!(
                                 "Vulkan Debug - ERROR - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
                         DebugUtilsMessageSeverity::WARNING => {
-                            error!(
+                            debug!(
                                 "Vulkan Debug - WARNING - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
                         }
                         DebugUtilsMessageSeverity::INFO => {
-                            info!(
+                            debug!(
                                 "Vulkan Debug - INFO - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
@@ -144,7 +137,7 @@ impl VulkanRenderer {
                             );
                         }
                         _ => {
-                            info!(
+                            debug!(
                                 "Vulkan Debug - UNKNOWN - {:?} - {:?}: {}",
                                 message_type, message_severity, callback_data.message
                             );
@@ -153,7 +146,7 @@ impl VulkanRenderer {
                 })
             }),
         )
-        .with_context(|| "Failed to create debug callback")?;
+            .with_context(|| "Failed to create debug callback")?;
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -170,7 +163,7 @@ impl VulkanRenderer {
                     .position(|(i, q)| {
                         q.queue_flags.intersects(QueueFlags::GRAPHICS)
                             && p.presentation_support(i as u32, &winit_window)
-                                .unwrap_or(false)
+                            .unwrap_or(false)
                     })
                     .map(|i| (p, i as u32))
             })
@@ -206,10 +199,10 @@ impl VulkanRenderer {
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
-            Default::default(),
+            StandardCommandBufferAllocatorCreateInfo::default(),
         ));
 
-        let resource_manager = VulkanResourceManager::new(
+        let resources = VulkanResourceManager::new(
             device.clone(),
             graphics_queue.clone(),
             command_buffer_allocator.clone(),
@@ -218,11 +211,12 @@ impl VulkanRenderer {
         Ok(VulkanRenderer {
             winit_window,
             instance,
+            #[cfg(debug_assertions)]
             _debug_callback,
             device,
             graphics_queue,
             command_buffer_allocator,
-            resource_manager,
+            resources,
             render_context: None,
         })
     }
@@ -246,21 +240,21 @@ impl VulkanRenderer {
             depth_range: 0.0..=1.0,
         };
 
-        let mut verts = VERTICES;
-        let inds = INDICES;
-        self.resource_manager.create_mesh(&mut verts, &inds)?;
+        let mut vertices = VERTICES;
+        let indices = INDICES;
+        self.resources.create_mesh(&mut vertices, &indices)?;
 
-        self.resource_manager
+        self.resources
             .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
 
         let descriptor_sets = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| {
                 let ubo = self
-                    .resource_manager
+                    .resources
                     .get_uniform_buffer(i)
                     .with_context(|| format!("Uniform buffer {i} not found"))?;
                 let set = DescriptorSet::new(
-                    self.resource_manager.descriptor_set_allocator.clone(),
+                    self.resources.descriptor_set_allocator.clone(),
                     pipeline.layout().set_layouts()[0].clone(),
                     [WriteDescriptorSet::buffer(0, ubo)],
                     [],
@@ -269,8 +263,14 @@ impl VulkanRenderer {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let frames = (0..MAX_FRAMES_IN_FLIGHT)
+            .map(|i| FrameState {
+                in_flight_future: None,
+                descriptor_set: descriptor_sets[i].clone(),
+            })
+            .collect::<Vec<_>>();
+
         let recreate_swapchain = false;
-        let in_flight_futures = (0..MAX_FRAMES_IN_FLIGHT).map(|_| None).collect();
 
         let start_time = Instant::now();
 
@@ -279,33 +279,35 @@ impl VulkanRenderer {
             pipeline,
             render_targets,
             viewport,
-            descriptor_sets,
             recreate_swapchain,
-            in_flight_futures,
+            frames,
             current_frame: 0,
             start_time,
         });
         Ok(())
     }
 
-    pub fn draw_frame(&mut self, window: &Window) -> Result<()> {
-        if window.is_minimized() || window.get_width() == 0 || window.get_height() == 0 {
+    pub fn draw_frame(&mut self) -> Result<()> {
+        let is_minimized = self.winit_window.is_minimized();
+        let window_size = self.winit_window.inner_size();
+
+        if is_minimized.is_none_or(|e| e) || window_size.width == 0 || window_size.height == 0 {
             info!("Window is minimized or has zero size, skipping draw frame");
-            return Ok(());
+            return Ok(())
         }
+
         let rcx = match self.render_context.as_mut() {
             Some(rcx) => rcx,
             None => {
-                error!("Render context not initialized, skipping draw frame");
-                return Ok(());
+                return Err(anyhow!("Render context not initialized"));
             }
         };
-        let window_size = self.winit_window.inner_size();
+
         // It is important to call this function from time to time, otherwise resources
-        // will keep accumulating and you will eventually reach an out of memory error.
+        // will keep accumulating, and you will eventually reach an out of memory error.
         // Calling this function polls various fences in order to determine what the GPU
         // has already processed, and frees the resources that are no longer needed.
-        if let Some(fence_future) = rcx.in_flight_futures[rcx.current_frame].as_mut() {
+        if let Some(fence_future) = rcx.frames[rcx.current_frame].in_flight_future.as_mut() {
             fence_future.wait(None)?; // ensure safe reuse of this slot's UBO
             fence_future.cleanup_finished();
         }
@@ -342,124 +344,35 @@ impl VulkanRenderer {
             rcx.recreate_swapchain = true;
             return Ok(());
         }
-
-        // debug!("Acquired image index: {}", image_index);
-
+        
         rcx.update_uniform_buffer(
-            self.resource_manager
+            self.resources
                 .get_uniform_buffer(rcx.current_frame)
                 .with_context(|| "Uniform buffer not found")?,
         )
-        .with_context(|| "Failed to update uniform buffer")?;
+            .with_context(|| "Failed to update uniform buffer")?;
 
-        let mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> =
-            AutoCommandBufferBuilder::primary(
+        if let Ok(builder) = rcx.build_command_buffer(
+            self.command_buffer_allocator.clone(),
+            self.graphics_queue.clone(),
+            image_index,
+        let builder = rcx
+            .build_command_buffer(
                 self.command_buffer_allocator.clone(),
-                self.graphics_queue.queue_family_index(),
-                CommandBufferUsage::OneTimeSubmit,
-            )?;
-
-        builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![Some([0.0, 0.0, 0.0, 1.0].into())],
-                    ..RenderPassBeginInfo::framebuffer(
-                        rcx.render_targets
-                            .framebuffers(0)
-                            .with_context(|| "No framebuffers for render pass 0")?
-                            [image_index as usize]
-                            .clone(),
-                    )
-                },
-                SubpassBeginInfo {
-                    contents: SubpassContents::Inline,
-                    ..Default::default()
-                },
-            )?
-            .set_viewport(0, [rcx.viewport.clone()].into_iter().collect())?
-            .bind_pipeline_graphics(rcx.pipeline.pipeline())?
-            .bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                rcx.pipeline.layout(),
-                0,
-                rcx.descriptor_sets[rcx.current_frame].clone(),
-            )
-            .with_context(|| "Failed to bind descriptor sets")?;
-
-        let mesh = self
-            .resource_manager
-            .get_mesh(0)
-            .with_context(|| "Mesh not found")?;
-        rcx.draw_mesh(mesh, &mut builder)?;
-
-        builder.end_render_pass(Default::default())?;
-
-        let command_buffer = builder.build()?;
-
-        // Build the future chain and obtain a fence future we can wait on next use of this slot.
-        let execution_future = acquire_future
-            .then_execute(self.graphics_queue.clone(), command_buffer)?
-            .then_swapchain_present(
                 self.graphics_queue.clone(),
-                SwapchainPresentInfo::swapchain_image_index(
-                    rcx.swapchain.swapchain.clone(),
-                    image_index,
-                ),
+                image_index,
             )
-            .boxed() // erase concrete type so we have a uniform storage type
-            .then_signal_fence_and_flush();
-
-        match execution_future.map_err(Validated::unwrap) {
-            Ok(future) => {
-                rcx.in_flight_futures[rcx.current_frame] = Some(future);
-            }
-            Err(VulkanError::OutOfDate) => {
-                rcx.recreate_swapchain = true;
-                rcx.in_flight_futures[rcx.current_frame] = None;
-            }
-            Err(e) => return Err(e.into()),
-        }
-
-        rcx.current_frame = (rcx.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-        Ok(())
-    }
-}
-
-impl RenderContext {
-    pub fn draw_mesh(
-        &mut self,
-        mesh: &RenderMesh,
-        cbb: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    ) -> Result<()> {
-        cbb.bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
-            .bind_index_buffer(mesh.index_buffer.clone())?;
-        // We add a draw command.
-        unsafe {
-            cbb.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
+            .with_context(|| "Failed to build command buffer")?;
+        let mut active_frame = ActiveFrame {
+            rcx,
+            resources: &self.resources,
+            builder: Some(builder),
+            image_index,
+            acquire_future: Some(acquire_future.boxed()),
+            _finished: false,
         };
-        Ok(())
-    }
-
-    pub fn update_uniform_buffer(
-        &mut self,
-        ubo_buffer: Subbuffer<UniformBufferObject>,
-    ) -> Result<()> {
-        let current_time = Instant::now();
-        let elapsed = current_time.duration_since(self.start_time);
-
-        let mut ubo = UniformBufferObject {
-            model: Mat4::from_rotation_z(elapsed.as_secs_f32() * 90.0f32.to_radians()),
-            view: Mat4::look_at_rh(Vec3::new(2.0, 2.0, 2.0), Vec3::ZERO, Vec3::Z),
-            proj: Mat4::perspective_rh(
-                45.0f32.to_radians(),
-                self.viewport.extent[0] / self.viewport.extent[1],
-                0.1,
-                10.0,
-            ),
-        };
-        ubo.proj.y_axis.y *= -1.0; // Invert Y coordinate for Vulkan
-
-        *ubo_buffer.write()? = ubo;
+        active_frame.draw_mesh(0).with_context(|| "Failed to draw mesh")?;
+        active_frame.execute_command_buffer(&self.graphics_queue.clone()).with_context(|| "Failed to execute command buffer")?;
         Ok(())
     }
 }
