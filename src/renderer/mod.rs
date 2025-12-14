@@ -1,6 +1,4 @@
-use crate::{
-    renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager,
-};
+use crate::{renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager};
 
 pub mod renderer_vulkan;
 
@@ -35,9 +33,8 @@ impl Renderer {
     }
 
     pub fn on_update(&mut self) {
-        if let Some(vk) = &mut self.vk_renderer
-        {
-            if let Ok(active_frame) = vk.begin_frame() {}
+        if let Some(vk) = &mut self.vk_renderer {
+            vk.draw_frame().expect("Failed to draw frame");
         }
     }
 }

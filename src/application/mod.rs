@@ -4,7 +4,6 @@ use crate::{
     input::Input, logger::Logger, renderer::Renderer, resource_manager::ResourceManager,
     window::Window,
 };
-use tracing::debug;
 use winit::event::WindowEvent;
 use winit::window::Window as WinitWindow;
 

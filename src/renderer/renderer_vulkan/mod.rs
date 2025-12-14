@@ -1,5 +1,5 @@
 use crate::renderer::renderer_vulkan::render_context::FrameState;
-use crate::{
+pub(crate) use crate::{
     renderer::renderer_vulkan::{
         buffers::{MyVertex, VulkanResourceManager},
         pipeline::VulkanPipeline,
@@ -11,28 +11,25 @@ use crate::{
     window::Window,
 };
 use anyhow::{anyhow, Context, Result};
-use glam::{Mat4, Vec2, Vec3};
-use std::{f32::consts::E, sync::Arc, time::Instant};
+use glam::{Vec2, Vec3};
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, error, info};
+use vulkano::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo;
 #[cfg(debug_assertions)]
 use vulkano::instance::debug::{
     DebugUtilsMessageSeverity, DebugUtilsMessenger, DebugUtilsMessengerCallback,
     DebugUtilsMessengerCreateInfo,
 };
 use vulkano::{
-    buffer::Subbuffer, command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
-        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassBeginInfo,
-        SubpassContents,
-    }, descriptor_set::{DescriptorSet, WriteDescriptorSet},
+    command_buffer::allocator::StandardCommandBufferAllocator, descriptor_set::{DescriptorSet, WriteDescriptorSet},
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
         QueueFlags,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
-    pipeline::{graphics::viewport::Viewport, PipelineBindPoint},
-    swapchain::{Surface, SwapchainPresentInfo},
-    sync::{future::FenceSignalFuture, GpuFuture},
+    pipeline::graphics::viewport::Viewport,
+    swapchain::Surface,
+    sync::GpuFuture,
     Validated,
     VulkanError,
     VulkanLibrary,
@@ -201,7 +198,7 @@ impl VulkanRenderer {
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
-            Default::default(),
+            StandardCommandBufferAllocatorCreateInfo::default(),
         ));
 
         let resources = VulkanResourceManager::new(
@@ -242,9 +239,9 @@ impl VulkanRenderer {
             depth_range: 0.0..=1.0,
         };
 
-        let mut verts = VERTICES;
-        let inds = INDICES;
-        self.resources.create_mesh(&mut verts, &inds)?;
+        let mut vertices = VERTICES;
+        let indices = INDICES;
+        self.resources.create_mesh(&mut vertices, &indices)?;
 
         self.resources
             .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
@@ -289,11 +286,11 @@ impl VulkanRenderer {
         Ok(())
     }
 
-    pub fn begin_frame(&mut self) -> Result<ActiveFrame> {
+    pub fn draw_frame(&'_ mut self) -> Result<()> {
         let is_minimized = self.winit_window.is_minimized();
         let window_size = self.winit_window.inner_size();
 
-        if is_minimized.is_none_or(|e| e == true)
+        if is_minimized.is_none_or(|e| e)
             || window_size.width == 0
             || window_size.height == 0
         {
@@ -364,28 +361,19 @@ impl VulkanRenderer {
             self.graphics_queue.clone(),
             image_index,
         ) {
-            Ok(ActiveFrame {
+            let mut active_frame = ActiveFrame {
                 rcx,
                 resources: &self.resources,
-                builder,
+                builder: Some(builder),
                 image_index,
-                acquire_future: acquire_future.boxed(),
-                finished: false,
-            })
+                acquire_future: Some(acquire_future.boxed()),
+                _finished: false,
+            };
+            active_frame.draw_mesh(0).with_context(|| "Failed to draw mesh")?;
+            active_frame.execute_command_buffer(&self.graphics_queue.clone()).with_context(|| "Failed to execute command buffer")?;
+            Ok(())
         } else {
             Err(anyhow!("Failed to build command buffer"))
         }
-    }
-
-    pub fn draw_frame(&mut self, mut frame: ActiveFrame) -> Result<()> {
-        frame.draw_mesh(0).with_context(|| "Failed to draw mesh")?;
-
-        frame.execute_command_buffer(self.graphics_queue.clone()).with_context(|| "Failed to execute command buffer")?;
-
-        Ok(())
-    }
-
-    pub fn end_frame(&mut self) -> Result<()> {
-        Ok(())
     }
 }

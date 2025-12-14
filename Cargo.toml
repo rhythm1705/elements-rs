@@ -4,9 +4,19 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Rhythm Goel <rhythm1705@outlook.com>"]
 
+[lints]
+# Treat all default rust compiler warnings (e.g., dead_code, unused_variables) as errors.
+rust.warnings = "deny"
+
+[lints.clippy]
+# Deny the entire set of default Clippy lints.
+all = "deny"
+# Deny the entire set of pedantic lints, which catch non-idiomatic or potentially messy code.
+#pedantic = "deny"
+
 [dependencies]
 anyhow = "1.0.99"
-glam = { version = "0.27.0", features = ["bytemuck"] }
+glam = { version = "0.30.9", features = ["bytemuck"] }
 # Compile out debug/info logs in release builds while keeping them in debug builds.
 # (debug_assertions is enabled for dev/profile dev builds.)
 tracing = { version = "0.1.41", features = ["release_max_level_warn"] }

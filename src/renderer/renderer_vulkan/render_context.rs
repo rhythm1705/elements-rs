@@ -1,11 +1,10 @@
-use crate::renderer::renderer_vulkan::{buffers::{RenderMesh, UniformBufferObject, VulkanResourceManager}, pipeline::VulkanPipeline, render_targets::RenderTargets, swapchain::VulkanSwapchain, MAX_FRAMES_IN_FLIGHT};
+use crate::renderer::renderer_vulkan::buffers::VulkanResourceManager;
+use crate::renderer::renderer_vulkan::{buffers::UniformBufferObject, pipeline::VulkanPipeline, render_targets::RenderTargets, swapchain::VulkanSwapchain, MAX_FRAMES_IN_FLIGHT};
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
 use std::{sync::Arc, time::Instant};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
-use vulkano::command_buffer::{
-    CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents,
-};
+use vulkano::command_buffer::{CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
 use vulkano::device::Queue;
 use vulkano::pipeline::PipelineBindPoint;
 use vulkano::swapchain::SwapchainPresentInfo;
@@ -27,30 +26,7 @@ pub struct FrameState {
     pub descriptor_set: Arc<DescriptorSet>,
 }
 
-pub struct ActiveFrame<'a> {
-    pub rcx: &'a mut RenderContext,
-    pub resources: &'a VulkanResourceManager,
-    pub builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
-    pub image_index: u32,
-    pub acquire_future: Box<dyn GpuFuture>,
-    pub finished: bool,
-}
-
 impl RenderContext {
-    pub fn draw_mesh(
-        &mut self,
-        mesh: &RenderMesh,
-        cbb: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    ) -> Result<()> {
-        cbb.bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
-            .bind_index_buffer(mesh.index_buffer.clone())?;
-        // We add a draw command.
-        unsafe {
-            cbb.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
-        };
-        Ok(())
-    }
-
     pub fn update_uniform_buffer(
         &mut self,
         ubo_buffer: Subbuffer<UniformBufferObject>,
@@ -118,29 +94,46 @@ impl RenderContext {
     }
 }
 
+pub struct ActiveFrame<'a> {
+    pub rcx: &'a mut RenderContext,
+    pub resources: &'a VulkanResourceManager,
+    pub builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
+    pub image_index: u32,
+    pub acquire_future: Option<Box<dyn GpuFuture>>,
+    pub _finished: bool,
+}
+
 impl<'a> ActiveFrame<'a> {
     pub fn draw_mesh(&mut self, mesh_index: usize) -> Result<()> {
         let mesh = self
             .resources
             .get_mesh(mesh_index)
             .with_context(|| format!("Mesh {mesh_index} not found"))?;
-        self.builder
-            .bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
-            .bind_index_buffer(mesh.index_buffer.clone())?;
-        // We add a draw command.
-        unsafe {
-            self.builder.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
-        };
+        if let Some(ref mut builder) = self.builder {
+            builder
+                .bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
+                .bind_index_buffer(mesh.index_buffer.clone())?;
+            // We add a draw command.
+            unsafe {
+                builder.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
+            };
+        } else {
+            return Err(anyhow::anyhow!("Command buffer builder not initialized"));
+        }
         Ok(())
     }
 
-    pub fn execute_command_buffer(&mut self, graphics_queue: Arc<Queue>) -> Result<()> {
-        self.builder.end_render_pass(Default::default())?;
+    pub fn execute_command_buffer(&mut self, graphics_queue: &Arc<Queue>) -> Result<()> {
+        let mut builder = self.builder.take()
+            .ok_or_else(|| anyhow::anyhow!("Command buffer builder not initialized"))?;
+        builder.end_render_pass(SubpassEndInfo::default())?;
 
-        let command_buffer = self.builder.build()?;
+        let command_buffer = builder.build()?;
 
         // Build the future chain and obtain a fence future we can wait on next use of this slot.
         let execution_future = self.acquire_future
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Acquire future not complete"))?
             .then_execute(graphics_queue.clone(), command_buffer)?
             .then_swapchain_present(
                 graphics_queue.clone(),

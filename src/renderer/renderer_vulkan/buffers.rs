@@ -3,17 +3,17 @@ use std::sync::Arc;
 use anyhow::Result;
 use glam::{Mat4, Vec2, Vec3};
 use vulkano::{
-    DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
-        allocator::StandardCommandBufferAllocator,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo,
+        PrimaryCommandBufferAbstract,
     },
     descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
+    DeviceSize,
 };
 
 #[derive(BufferContents, Vertex, Clone, Copy)]
@@ -42,7 +42,7 @@ pub struct UniformBufferObject {
 pub struct RenderMesh {
     pub vertex_buffer: Subbuffer<[MyVertex]>,
     pub index_buffer: Subbuffer<[u32]>,
-    pub vertex_count: u32,
+    pub _vertex_count: u32,
     pub index_count: u32,
 }
 
@@ -79,7 +79,7 @@ impl VulkanResourceManager {
         let index_buffer = self.create_index_buffer(indices)?;
 
         let mesh = RenderMesh {
-            vertex_count: vertices.len() as u32,
+            _vertex_count: vertices.len() as u32,
             index_count: indices.len() as u32,
             vertex_buffer,
             index_buffer,
