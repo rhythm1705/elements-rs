@@ -356,24 +356,23 @@ impl VulkanRenderer {
             self.command_buffer_allocator.clone(),
             self.graphics_queue.clone(),
             image_index,
-        ) {
-            let mut active_frame = ActiveFrame {
-                rcx,
-                resources: &self.resources,
-                builder: Some(builder),
+        let builder = rcx
+            .build_command_buffer(
+                self.command_buffer_allocator.clone(),
+                self.graphics_queue.clone(),
                 image_index,
-                acquire_future: Some(acquire_future.boxed()),
-                _finished: false,
-            };
-            active_frame
-                .draw_mesh(0)
-                .with_context(|| "Failed to draw mesh")?;
-            active_frame
-                .execute_command_buffer(&self.graphics_queue.clone())
-                .with_context(|| "Failed to execute command buffer")?;
-            Ok(())
-        } else {
-            Err(anyhow!("Failed to build command buffer"))
-        }
+            )
+            .with_context(|| "Failed to build command buffer")?;
+        let mut active_frame = ActiveFrame {
+            rcx,
+            resources: &self.resources,
+            builder: Some(builder),
+            image_index,
+            acquire_future: Some(acquire_future.boxed()),
+            _finished: false,
+        };
+        active_frame.draw_mesh(0).with_context(|| "Failed to draw mesh")?;
+        active_frame.execute_command_buffer(&self.graphics_queue.clone()).with_context(|| "Failed to execute command buffer")?;
+        Ok(())
     }
 }
