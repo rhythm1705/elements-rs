@@ -10,7 +10,7 @@ pub(crate) use crate::{
     resource_manager::ResourceManager,
     window::Window,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use glam::{Vec2, Vec3};
 use std::{sync::Arc, time::Instant};
 #[cfg(debug_assertions)]
@@ -23,17 +23,17 @@ use vulkano::instance::debug::{
     DebugUtilsMessengerCreateInfo,
 };
 use vulkano::{
-    Validated, VulkanError, VulkanLibrary,
-    command_buffer::allocator::StandardCommandBufferAllocator,
-    descriptor_set::{DescriptorSet, WriteDescriptorSet},
-    device::{
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
-        physical::PhysicalDeviceType,
+    command_buffer::allocator::StandardCommandBufferAllocator, descriptor_set::{DescriptorSet, WriteDescriptorSet}, device::{
+        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+        QueueFlags,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
     swapchain::Surface,
     sync::GpuFuture,
+    Validated,
+    VulkanError,
+    VulkanLibrary,
 };
 use winit::window::Window as WinitWindow;
 
@@ -146,7 +146,7 @@ impl VulkanRenderer {
                 })
             }),
         )
-        .with_context(|| "Failed to create debug callback")?;
+            .with_context(|| "Failed to create debug callback")?;
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -163,7 +163,7 @@ impl VulkanRenderer {
                     .position(|(i, q)| {
                         q.queue_flags.intersects(QueueFlags::GRAPHICS)
                             && p.presentation_support(i as u32, &winit_window)
-                                .unwrap_or(false)
+                            .unwrap_or(false)
                     })
                     .map(|i| (p, i as u32))
             })
@@ -287,13 +287,13 @@ impl VulkanRenderer {
         Ok(())
     }
 
-    pub fn draw_frame(&'_ mut self) -> Result<()> {
+    pub fn draw_frame(&mut self) -> Result<()> {
         let is_minimized = self.winit_window.is_minimized();
         let window_size = self.winit_window.inner_size();
 
         if is_minimized.is_none_or(|e| e) || window_size.width == 0 || window_size.height == 0 {
             info!("Window is minimized or has zero size, skipping draw frame");
-            return Err(anyhow!("Window is minimized or has zero size"));
+            return Ok(())
         }
 
         let rcx = match self.render_context.as_mut() {
@@ -333,7 +333,7 @@ impl VulkanRenderer {
             Ok(r) => r,
             Err(VulkanError::OutOfDate) => {
                 rcx.recreate_swapchain = true;
-                return Err(anyhow!("Swapchain out of date"));
+                return Ok(());
             }
             Err(e) => {
                 return Err(e.into());
@@ -342,17 +342,15 @@ impl VulkanRenderer {
 
         if suboptimal {
             rcx.recreate_swapchain = true;
-            return Err(anyhow!("Swapchain suboptimal"));
+            return Ok(());
         }
-
-        // debug!("Acquired image index: {}", image_index);
-
+        
         rcx.update_uniform_buffer(
             self.resources
                 .get_uniform_buffer(rcx.current_frame)
                 .with_context(|| "Uniform buffer not found")?,
         )
-        .with_context(|| "Failed to update uniform buffer")?;
+            .with_context(|| "Failed to update uniform buffer")?;
 
         if let Ok(builder) = rcx.build_command_buffer(
             self.command_buffer_allocator.clone(),
