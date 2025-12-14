@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use vulkano::{
-    device::Device, format::Format,
+    Validated, VulkanError,
+    device::Device,
+    format::Format,
     image::{Image, ImageUsage},
     swapchain::{
-        acquire_next_image, ColorSpace, Surface, Swapchain,
-        SwapchainAcquireFuture, SwapchainCreateInfo,
+        ColorSpace, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
+        acquire_next_image,
     },
-    Validated,
-    VulkanError,
 };
 
 use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;

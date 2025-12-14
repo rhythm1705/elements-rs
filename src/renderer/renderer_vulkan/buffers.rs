@@ -3,17 +3,17 @@ use std::sync::Arc;
 use anyhow::Result;
 use glam::{Mat4, Vec2, Vec3};
 use vulkano::{
+    DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo,
-        PrimaryCommandBufferAbstract,
+        AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
+        allocator::StandardCommandBufferAllocator,
     },
     descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
-    DeviceSize,
 };
 
 #[derive(BufferContents, Vertex, Clone, Copy)]
@@ -21,7 +21,7 @@ use vulkano::{
 pub struct MyVertex {
     // Every field needs to explicitly state the desired shader input format
     // The `name` attribute can be used to specify shader input names to match.
-    // By default the field-name is used.
+    // By default, the field-name is used.
     #[name("inPosition")]
     #[format(R32G32_SFLOAT)]
     pub position: Vec2,
@@ -92,20 +92,8 @@ impl VulkanResourceManager {
         self.meshes.get(mesh_id)
     }
 
-    fn create_vertex_buffer(&self, vertices: &mut [MyVertex]) -> Result<Subbuffer<[MyVertex]>> {
-        let staging_buffer = Buffer::from_iter(
-            self.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_SRC,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vertices.iter().cloned(),
-        )?;
+    fn create_vertex_buffer(&self, vertices: &[MyVertex]) -> Result<Subbuffer<[MyVertex]>> {
+        let staging_buffer = self.create_staging_buffer(vertices)?;
 
         let vertex_buffer = Buffer::new_slice::<MyVertex>(
             self.memory_allocator.clone(),
@@ -142,19 +130,7 @@ impl VulkanResourceManager {
     }
 
     fn create_index_buffer(&self, indices: &[u32]) -> Result<Subbuffer<[u32]>> {
-        let staging_buffer = Buffer::from_iter(
-            self.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_SRC,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            indices.iter().cloned(),
-        )?;
+        let staging_buffer = self.create_staging_buffer(indices)?;
 
         let index_buffer = Buffer::new_slice::<u32>(
             self.memory_allocator.clone(),
@@ -188,6 +164,26 @@ impl VulkanResourceManager {
             .wait(None /* timeout */)?;
 
         Ok(index_buffer)
+    }
+
+    fn create_staging_buffer<T: BufferContents + Clone>(
+        &self,
+        data: &[T],
+    ) -> Result<Subbuffer<[T]>> {
+        let staging_buffer = Buffer::from_iter(
+            self.memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            data.iter().cloned(),
+        )?;
+        Ok(staging_buffer)
     }
 
     pub fn create_uniform_buffers(&mut self, count: usize) -> Result<()> {
