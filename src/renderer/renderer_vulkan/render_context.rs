@@ -1,5 +1,5 @@
-use crate::renderer::renderer_vulkan::buffers::VulkanResourceManager;
-use crate::renderer::renderer_vulkan::{buffers::UniformBufferObject, pipeline::VulkanPipeline, render_targets::RenderTargets, swapchain::VulkanSwapchain, MAX_FRAMES_IN_FLIGHT};
+use crate::renderer::renderer_vulkan::resources::VulkanResources;
+use crate::renderer::renderer_vulkan::{pipeline::VulkanPipeline, render_targets::RenderTargets, resources::UniformBufferObject, swapchain::VulkanSwapchain, MAX_FRAMES_IN_FLIGHT};
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
 use std::{sync::Arc, time::Instant};
@@ -23,7 +23,7 @@ pub struct RenderContext {
 
 pub struct FrameState {
     pub in_flight_future: Option<FenceSignalFuture<Box<dyn GpuFuture>>>,
-    pub descriptor_set: Arc<DescriptorSet>,
+    pub descriptor_sets: Vec<Arc<DescriptorSet>>,
 }
 
 impl RenderContext {
@@ -86,7 +86,7 @@ impl RenderContext {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout(),
                 0,
-                self.frames[self.current_frame].descriptor_set.clone(),
+                self.frames[self.current_frame].descriptor_sets.clone(),
             )
             .with_context(|| "Failed to bind descriptor sets")?;
 
@@ -96,7 +96,7 @@ impl RenderContext {
 
 pub struct ActiveFrame<'a> {
     pub rcx: &'a mut RenderContext,
-    pub resources: &'a VulkanResourceManager,
+    pub resources: &'a VulkanResources,
     pub builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
     pub image_index: u32,
     pub acquire_future: Option<Box<dyn GpuFuture>>,

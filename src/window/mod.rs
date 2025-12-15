@@ -5,7 +5,6 @@ use winit::window::Window as WinitWindow;
 pub struct Window {
     winit_window: Arc<WinitWindow>,
     is_focused: bool,
-    is_minimized: Option<bool>,
     width: u32,
     height: u32,
 }
@@ -13,11 +12,9 @@ pub struct Window {
 impl Window {
     pub fn new(winit_window: Arc<WinitWindow>) -> Self {
         let size = winit_window.inner_size();
-        let is_minimized = winit_window.is_minimized();
         Window {
             winit_window,
             is_focused: false,
-            is_minimized,
             width: size.width,
             height: size.height,
         }
@@ -36,7 +33,7 @@ impl Window {
     }
 
     pub fn is_minimized(&self) -> bool {
-        self.is_minimized.unwrap_or(false)
+        self.winit_window.is_minimized().unwrap_or(false)
     }
 
     pub fn set_size(&mut self, width: u32, height: u32) {

@@ -1,46 +1,48 @@
 use crate::renderer::renderer_vulkan::render_context::FrameState;
 pub(crate) use crate::{
     renderer::renderer_vulkan::{
-        buffers::{MyVertex, VulkanResourceManager},
         pipeline::VulkanPipeline,
         render_context::{ActiveFrame, RenderContext},
         render_targets::RenderTargets,
+        resources::{MyVertex, VulkanResources},
         swapchain::VulkanSwapchain,
     },
     resource_manager::ResourceManager,
     window::Window,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use glam::{Vec2, Vec3};
-use std::{sync::Arc, time::Instant};
+use std::time::Duration;
+use std::{sync::Arc, thread, time::Instant};
 #[cfg(debug_assertions)]
 use tracing::debug;
 use tracing::info;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo;
+use vulkano::device::DeviceFeatures;
 #[cfg(debug_assertions)]
 use vulkano::instance::debug::{
     DebugUtilsMessageSeverity, DebugUtilsMessenger, DebugUtilsMessengerCallback,
     DebugUtilsMessengerCreateInfo,
 };
 use vulkano::{
-    Validated, VulkanError, VulkanLibrary,
-    command_buffer::allocator::StandardCommandBufferAllocator,
-    descriptor_set::{DescriptorSet, WriteDescriptorSet},
-    device::{
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
-        physical::PhysicalDeviceType,
+    command_buffer::allocator::StandardCommandBufferAllocator, descriptor_set::{DescriptorSet, WriteDescriptorSet}, device::{
+        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+        QueueFlags,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
     swapchain::Surface,
     sync::GpuFuture,
+    Validated,
+    VulkanError,
+    VulkanLibrary,
 };
 use winit::window::Window as WinitWindow;
 
-mod buffers;
 mod pipeline;
 mod render_context;
 mod render_targets;
+mod resources;
 mod shaders;
 mod swapchain;
 
@@ -50,18 +52,22 @@ const VERTICES: [MyVertex; 4] = [
     MyVertex {
         position: Vec2::new(-0.5, -0.5),
         color: Vec3::new(1.0, 0.0, 0.0),
+        tex_coord: Vec2::new(1.0, 0.0),
     },
     MyVertex {
         position: Vec2::new(0.5, -0.5),
         color: Vec3::new(0.0, 1.0, 0.0),
+        tex_coord: Vec2::new(0.0, 0.0),
     },
     MyVertex {
         position: Vec2::new(0.5, 0.5),
         color: Vec3::new(0.0, 0.0, 1.0),
+        tex_coord: Vec2::new(0.0, 1.0),
     },
     MyVertex {
         position: Vec2::new(-0.5, 0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
+        tex_coord: Vec2::new(1.0, 1.0),
     },
 ];
 
@@ -75,7 +81,7 @@ pub struct VulkanRenderer {
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    resources: VulkanResourceManager,
+    resources: VulkanResources,
     render_context: Option<RenderContext>,
 }
 
@@ -95,7 +101,9 @@ impl VulkanRenderer {
         let mut required_extensions = Surface::required_extensions(&winit_window)?;
         if enable_validation {
             required_extensions.ext_debug_utils = true;
+            info!("Vulkan validation layers enabled");
         }
+
         let instance = Instance::new(
             vk_lib,
             InstanceCreateInfo {
@@ -146,7 +154,7 @@ impl VulkanRenderer {
                 })
             }),
         )
-        .with_context(|| "Failed to create debug callback")?;
+            .with_context(|| "Failed to create debug callback")?;
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -157,13 +165,18 @@ impl VulkanRenderer {
             .enumerate_physical_devices()?
             .filter(|p| p.supported_extensions().contains(&device_extensions))
             .filter_map(|p| {
+                info!(
+                    "Found device: {} (type: {:?})",
+                    p.properties().device_name,
+                    p.properties().device_type
+                );
                 p.queue_family_properties()
                     .iter()
                     .enumerate()
                     .position(|(i, q)| {
                         q.queue_flags.intersects(QueueFlags::GRAPHICS)
                             && p.presentation_support(i as u32, &winit_window)
-                                .unwrap_or(false)
+                            .unwrap_or(false)
                     })
                     .map(|i| (p, i as u32))
             })
@@ -191,7 +204,10 @@ impl VulkanRenderer {
                     queue_family_index,
                     ..Default::default()
                 }],
-
+                enabled_features: DeviceFeatures {
+                    sampler_anisotropy: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         )?;
@@ -202,7 +218,7 @@ impl VulkanRenderer {
             StandardCommandBufferAllocatorCreateInfo::default(),
         ));
 
-        let resources = VulkanResourceManager::new(
+        let resources = VulkanResources::new(
             device.clone(),
             graphics_queue.clone(),
             command_buffer_allocator.clone(),
@@ -240,6 +256,9 @@ impl VulkanRenderer {
             depth_range: 0.0..=1.0,
         };
 
+        self.resources
+            .create_texture("Textures/tex1.jpg".as_ref())?;
+
         let mut vertices = VERTICES;
         let indices = INDICES;
         self.resources.create_mesh(&mut vertices, &indices)?;
@@ -247,26 +266,31 @@ impl VulkanRenderer {
         self.resources
             .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
 
-        let descriptor_sets = (0..MAX_FRAMES_IN_FLIGHT)
+        let descriptor_set = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| {
                 let ubo = self
                     .resources
                     .get_uniform_buffer(i)
                     .with_context(|| format!("Uniform buffer {i} not found"))?;
+                let img = self
+                    .resources
+                    .get_texture("Textures/tex1.jpg".as_ref())
+                    .with_context(|| "Texture image view not found")?;
                 let set = DescriptorSet::new(
                     self.resources.descriptor_set_allocator.clone(),
                     pipeline.layout().set_layouts()[0].clone(),
-                    [WriteDescriptorSet::buffer(0, ubo)],
+                    [WriteDescriptorSet::buffer(0, ubo),
+                        WriteDescriptorSet::image_view_sampler(1, img.image_view.clone(), img.sampler.clone())],
                     [],
                 )?;
-                Ok::<Arc<DescriptorSet>, anyhow::Error>(set)
+                Ok(set)
             })
             .collect::<Result<Vec<_>>>()?;
 
         let frames = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| FrameState {
                 in_flight_future: None,
-                descriptor_set: descriptor_sets[i].clone(),
+                descriptor_sets: vec![descriptor_set[i].clone()],
             })
             .collect::<Vec<_>>();
 
@@ -291,17 +315,22 @@ impl VulkanRenderer {
         let is_minimized = self.winit_window.is_minimized();
         let window_size = self.winit_window.inner_size();
 
-        if is_minimized.is_none_or(|e| e) || window_size.width == 0 || window_size.height == 0 {
-            info!("Window is minimized or has zero size, skipping draw frame");
-            return Ok(());
-        }
-
         let rcx = match self.render_context.as_mut() {
             Some(rcx) => rcx,
             None => {
                 return Err(anyhow!("Render context not initialized"));
             }
         };
+
+        if is_minimized.is_some_and(|minimized| minimized)
+            || window_size.width == 0
+            || window_size.height == 0
+        {
+            // If the window is minimized, we skip rendering this frame.
+            thread::sleep(Duration::from_millis(50));
+            rcx.recreate_swapchain = true;
+            return Ok(());
+        }
 
         // It is important to call this function from time to time, otherwise resources
         // will keep accumulating, and you will eventually reach an out of memory error.
@@ -350,7 +379,7 @@ impl VulkanRenderer {
                 .get_uniform_buffer(rcx.current_frame)
                 .with_context(|| "Uniform buffer not found")?,
         )
-        .with_context(|| "Failed to update uniform buffer")?;
+            .with_context(|| "Failed to update uniform buffer")?;
 
         match rcx.build_command_buffer(
             self.command_buffer_allocator.clone(),
