@@ -290,7 +290,7 @@ impl VulkanRenderer {
         let frames = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| FrameState {
                 in_flight_future: None,
-                descriptor_sets: vec!(descriptor_set[i].clone()),
+                descriptor_sets: vec![descriptor_set[i].clone()],
             })
             .collect::<Vec<_>>();
 
