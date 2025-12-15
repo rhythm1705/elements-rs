@@ -1,7 +1,17 @@
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
+use vulkano::image::sampler::SamplerAddressMode;
 
 use anyhow::Result;
 use glam::{Mat4, Vec2, Vec3};
+use image::ImageReader;
+use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
+use vulkano::image::Image;
+use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
+use vulkano::image::sampler::SamplerMipmapMode::Linear;
+use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
+use vulkano::image::view::ImageView;
 use vulkano::{
     DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -46,16 +56,25 @@ pub struct RenderMesh {
     pub index_count: u32,
 }
 
-pub struct VulkanResourceManager {
+#[allow(dead_code)]
+pub struct Texture {
+    pub image: Arc<Image>,
+    pub image_view: Arc<ImageView>,
+    pub sampler: Arc<Sampler>,
+}
+
+pub struct VulkanResources {
+    device: Arc<Device>,
     memory_allocator: Arc<StandardMemoryAllocator>,
     meshes: Vec<RenderMesh>,
+    textures: HashMap<String, Texture>,
     uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
     pub descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
 
-impl VulkanResourceManager {
+impl VulkanResources {
     pub fn new(
         device: Arc<Device>,
         graphics_queue: Arc<Queue>,
@@ -65,8 +84,10 @@ impl VulkanResourceManager {
         let descriptor_set_allocator =
             StandardDescriptorSetAllocator::new(device.clone(), Default::default());
         Self {
+            device,
             memory_allocator,
             meshes: Vec::new(),
+            textures: HashMap::new(),
             uniform_buffers: Vec::new(),
             descriptor_set_allocator: Arc::new(descriptor_set_allocator),
             graphics_queue,
@@ -92,6 +113,86 @@ impl VulkanResourceManager {
         self.meshes.get(mesh_id)
     }
 
+    pub fn create_texture(&mut self, path: &Path) -> Result<()> {
+        let path_str = path.to_string_lossy().to_string();
+        if self.textures.contains_key(&path_str) {
+            return Ok(());
+        }
+
+        let image = self.create_texture_image(path)?;
+        let image_view = self.create_texture_image_view(image.clone())?;
+        let sampler = self.create_texture_sampler()?;
+
+        let texture = Texture {
+            image,
+            image_view,
+            sampler,
+        };
+        self.textures.insert(path_str, texture);
+        Ok(())
+    }
+
+    pub fn create_texture_image(&self, path: &Path) -> Result<Arc<Image>> {
+        let img = ImageReader::open(path)?.decode()?.to_rgba8();
+        let (width, height) = img.dimensions();
+        let staging_buffer = self.create_staging_buffer(&img.into_raw())?;
+
+        let texture_image = Image::new(
+            self.memory_allocator.clone(),
+            vulkano::image::ImageCreateInfo {
+                image_type: vulkano::image::ImageType::Dim2d,
+                format: vulkano::format::Format::R8G8B8A8_SRGB,
+                extent: [width, height, 1],
+                mip_levels: 1,
+                array_layers: 1,
+                samples: vulkano::image::SampleCount::Sample1,
+                usage: vulkano::image::ImageUsage::TRANSFER_DST
+                    | vulkano::image::ImageUsage::SAMPLED,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )?;
+
+        self.copy_buffer_to_image(staging_buffer, texture_image.clone())?;
+
+        Ok(texture_image)
+    }
+
+    fn create_texture_image_view(&self, image: Arc<Image>) -> Result<Arc<ImageView>> {
+        let image_view = ImageView::new_default(image)?;
+        Ok(image_view)
+    }
+
+    fn create_texture_sampler(&self) -> Result<Arc<Sampler>> {
+        let sampler = Sampler::new(
+            self.device.clone(),
+            SamplerCreateInfo {
+                mag_filter: Filter::Linear,
+                min_filter: Filter::Linear,
+                address_mode: [SamplerAddressMode::Repeat; 3],
+                anisotropy: Some(self.device.physical_device().properties().max_sampler_anisotropy),
+                border_color: IntOpaqueBlack,
+                mipmap_mode: Linear,
+                ..Default::default()
+            },
+        )?;
+        Ok(sampler)
+    }
+
+    fn copy_buffer_to_image<T: BufferContents + Clone>(
+        &self,
+        src_buffer: Subbuffer<[T]>,
+        dst_image: Arc<Image>,
+    ) -> Result<()> {
+        let mut cbb = self.begin_single_time_commands()?;
+        cbb.copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(src_buffer, dst_image))?;
+        self.end_single_time_commands(cbb)?;
+        Ok(())
+    }
+
     fn create_vertex_buffer(&self, vertices: &[MyVertex]) -> Result<Subbuffer<[MyVertex]>> {
         let staging_buffer = self.create_staging_buffer(vertices)?;
 
@@ -109,22 +210,7 @@ impl VulkanResourceManager {
             vertices.len() as DeviceSize,
         )?;
 
-        // Create a one-time command to copy between the buffers.
-        let mut cbb = AutoCommandBufferBuilder::primary(
-            self.command_buffer_allocator.clone(),
-            self.graphics_queue.queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )?;
-        cbb.copy_buffer(CopyBufferInfo::buffers(
-            staging_buffer,
-            vertex_buffer.clone(),
-        ))?;
-        let cb = cbb.build()?;
-
-        // Execute the copy command and wait for completion before proceeding.
-        cb.execute(self.graphics_queue.clone())?
-            .then_signal_fence_and_flush()?
-            .wait(None /* timeout */)?;
+        self.copy_buffer(staging_buffer, vertex_buffer.clone())?;
 
         Ok(vertex_buffer)
     }
@@ -146,22 +232,7 @@ impl VulkanResourceManager {
             indices.len() as DeviceSize,
         )?;
 
-        // Create a one-time command to copy between the buffers.
-        let mut cbb = AutoCommandBufferBuilder::primary(
-            self.command_buffer_allocator.clone(),
-            self.graphics_queue.queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )?;
-        cbb.copy_buffer(CopyBufferInfo::buffers(
-            staging_buffer,
-            index_buffer.clone(),
-        ))?;
-        let cb = cbb.build()?;
-
-        // Execute the copy command and wait for completion before proceeding.
-        cb.execute(self.graphics_queue.clone())?
-            .then_signal_fence_and_flush()?
-            .wait(None /* timeout */)?;
+        self.copy_buffer(staging_buffer, index_buffer.clone())?;
 
         Ok(index_buffer)
     }
@@ -184,6 +255,39 @@ impl VulkanResourceManager {
             data.iter().cloned(),
         )?;
         Ok(staging_buffer)
+    }
+
+    fn copy_buffer<T: BufferContents + Clone>(
+        &self,
+        src: Subbuffer<[T]>,
+        dst: Subbuffer<[T]>,
+    ) -> Result<()> {
+        let mut cbb = self.begin_single_time_commands()?;
+        cbb.copy_buffer(CopyBufferInfo::buffers(src, dst))?;
+        self.end_single_time_commands(cbb)?;
+        Ok(())
+    }
+
+    fn begin_single_time_commands(
+        &self,
+    ) -> Result<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>> {
+        let command_buffer = AutoCommandBufferBuilder::primary(
+            self.command_buffer_allocator.clone(),
+            self.graphics_queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )?;
+        Ok(command_buffer)
+    }
+
+    fn end_single_time_commands(
+        &self,
+        command_buffer: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ) -> Result<()> {
+        let cb = command_buffer.build()?;
+        cb.execute(self.graphics_queue.clone())?
+            .then_signal_fence_and_flush()?
+            .wait(None /* timeout */)?;
+        Ok(())
     }
 
     pub fn create_uniform_buffers(&mut self, count: usize) -> Result<()> {

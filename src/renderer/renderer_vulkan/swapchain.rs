@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use vulkano::{
-    Validated, VulkanError,
-    device::Device,
-    format::Format,
+    device::Device, format::Format,
     image::{Image, ImageUsage},
     swapchain::{
-        ColorSpace, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
-        acquire_next_image,
+        acquire_next_image, ColorSpace, Surface, Swapchain, SwapchainAcquireFuture,
+        SwapchainCreateInfo,
     },
+    Validated,
+    VulkanError,
 };
 
 use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
@@ -24,6 +24,7 @@ use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
 pub struct VulkanSwapchain {
     pub swapchain: Arc<Swapchain>,
     // support_details: SwapchainSupportDetails,
+    // pub surface: Arc<Surface>,
     pub images: Vec<Arc<Image>>,
     pub format: Format,
     pub extent: [u32; 2],
@@ -57,7 +58,7 @@ impl VulkanSwapchain {
 
             Swapchain::new(
                 device.clone(),
-                surface,
+                surface.clone(),
                 SwapchainCreateInfo {
                     min_image_count: surface_capabilities
                         .min_image_count
@@ -86,6 +87,7 @@ impl VulkanSwapchain {
 
         Ok(VulkanSwapchain {
             swapchain,
+            // surface,
             images,
             format,
             extent,
