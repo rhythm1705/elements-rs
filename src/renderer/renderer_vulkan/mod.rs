@@ -52,18 +52,22 @@ const VERTICES: [MyVertex; 4] = [
     MyVertex {
         position: Vec2::new(-0.5, -0.5),
         color: Vec3::new(1.0, 0.0, 0.0),
+        tex_coord: Vec2::new(1.0, 0.0),
     },
     MyVertex {
         position: Vec2::new(0.5, -0.5),
         color: Vec3::new(0.0, 1.0, 0.0),
+        tex_coord: Vec2::new(0.0, 0.0),
     },
     MyVertex {
         position: Vec2::new(0.5, 0.5),
         color: Vec3::new(0.0, 0.0, 1.0),
+        tex_coord: Vec2::new(0.0, 1.0),
     },
     MyVertex {
         position: Vec2::new(-0.5, 0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
+        tex_coord: Vec2::new(1.0, 1.0),
     },
 ];
 
@@ -161,7 +165,11 @@ impl VulkanRenderer {
             .enumerate_physical_devices()?
             .filter(|p| p.supported_extensions().contains(&device_extensions))
             .filter_map(|p| {
-                debug!("Found device: {} (type: {:?})", p.properties().device_name, p.properties().device_type);
+                info!(
+                    "Found device: {} (type: {:?})",
+                    p.properties().device_name,
+                    p.properties().device_type
+                );
                 p.queue_family_properties()
                     .iter()
                     .enumerate()
@@ -258,26 +266,31 @@ impl VulkanRenderer {
         self.resources
             .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
 
-        let descriptor_sets = (0..MAX_FRAMES_IN_FLIGHT)
+        let descriptor_set = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| {
                 let ubo = self
                     .resources
                     .get_uniform_buffer(i)
                     .with_context(|| format!("Uniform buffer {i} not found"))?;
+                let img = self
+                    .resources
+                    .get_texture("Textures/tex1.jpg".as_ref())
+                    .with_context(|| "Texture image view not found")?;
                 let set = DescriptorSet::new(
                     self.resources.descriptor_set_allocator.clone(),
                     pipeline.layout().set_layouts()[0].clone(),
-                    [WriteDescriptorSet::buffer(0, ubo)],
+                    [WriteDescriptorSet::buffer(0, ubo),
+                        WriteDescriptorSet::image_view_sampler(1, img.image_view.clone(), img.sampler.clone())],
                     [],
                 )?;
-                Ok::<Arc<DescriptorSet>, anyhow::Error>(set)
+                Ok(set)
             })
             .collect::<Result<Vec<_>>>()?;
 
         let frames = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| FrameState {
                 in_flight_future: None,
-                descriptor_set: descriptor_sets[i].clone(),
+                descriptor_sets: vec!(descriptor_set[i].clone()),
             })
             .collect::<Vec<_>>();
 

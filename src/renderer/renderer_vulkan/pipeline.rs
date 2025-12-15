@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use vulkano::{
     descriptor_set::layout::{
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
@@ -9,25 +9,25 @@ use vulkano::{
     device::Device,
     format::Format,
     pipeline::{
-        DynamicState, GraphicsPipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         graphics::{
-            GraphicsPipelineCreateInfo,
             color_blend::{ColorBlendAttachmentState, ColorBlendState},
             input_assembly::InputAssemblyState,
             multisample::MultisampleState,
             rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState},
             vertex_input::{Vertex, VertexDefinition},
             viewport::ViewportState,
-        },
-        layout::PipelineLayoutCreateInfo,
+            GraphicsPipelineCreateInfo,
+        }, layout::PipelineLayoutCreateInfo, DynamicState, GraphicsPipeline, Pipeline,
+        PipelineLayout,
+        PipelineShaderStageCreateInfo,
     },
     render_pass::{RenderPass, Subpass},
     shader::ShaderStages,
 };
 
 use crate::renderer::renderer_vulkan::{
-    MyVertex,
     shaders::{fs, vs},
+    MyVertex,
 };
 
 pub struct VulkanPipeline {
@@ -76,15 +76,18 @@ impl VulkanPipeline {
                 ..RasterizationState::default()
             };
 
-            let mut descriptor_set_layout_binding =
+            let mut ubo_layout_binding =
                 DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBuffer);
+            ubo_layout_binding.stages = ShaderStages::VERTEX | ShaderStages::FRAGMENT;
 
-            descriptor_set_layout_binding.stages = ShaderStages::VERTEX | ShaderStages::FRAGMENT;
+            let mut sampler_layout_binding =
+                DescriptorSetLayoutBinding::descriptor_type(DescriptorType::CombinedImageSampler);
+            sampler_layout_binding.stages = ShaderStages::FRAGMENT;
 
             let descriptor_set_layout = DescriptorSetLayout::new(
                 device.clone(),
                 DescriptorSetLayoutCreateInfo {
-                    bindings: vec![(0, descriptor_set_layout_binding)]
+                    bindings: vec![(0, ubo_layout_binding), (1, sampler_layout_binding)]
                         .into_iter()
                         .collect(),
                     ..Default::default()

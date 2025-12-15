@@ -7,23 +7,23 @@ use anyhow::Result;
 use glam::{Mat4, Vec2, Vec3};
 use image::ImageReader;
 use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
-use vulkano::image::Image;
 use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
 use vulkano::image::sampler::SamplerMipmapMode::Linear;
 use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
+use vulkano::image::Image;
 use vulkano::{
-    DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
-        allocator::StandardCommandBufferAllocator,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo,
+        PrimaryCommandBufferAbstract,
     },
     descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
+    DeviceSize,
 };
 
 #[derive(BufferContents, Vertex, Clone, Copy)]
@@ -39,6 +39,10 @@ pub struct MyVertex {
     #[name("inColor")]
     #[format(R32G32B32_SFLOAT)]
     pub color: Vec3,
+
+    #[name("inTexCoord")]
+    #[format(R32G32_SFLOAT)]
+    pub tex_coord: Vec2,
 }
 
 #[derive(BufferContents, Clone, Copy, Default)]
@@ -69,7 +73,7 @@ pub struct VulkanResources {
     meshes: Vec<RenderMesh>,
     textures: HashMap<String, Texture>,
     uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
-    pub descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
+    pub(crate) descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
@@ -132,7 +136,12 @@ impl VulkanResources {
         Ok(())
     }
 
-    pub fn create_texture_image(&self, path: &Path) -> Result<Arc<Image>> {
+    pub fn get_texture(&self, path: &Path) -> Option<&Texture> {
+        let path_str = path.to_string_lossy().to_string();
+        self.textures.get(&path_str)
+    }
+
+    fn create_texture_image(&self, path: &Path) -> Result<Arc<Image>> {
         let img = ImageReader::open(path)?.decode()?.to_rgba8();
         let (width, height) = img.dimensions();
         let staging_buffer = self.create_staging_buffer(&img.into_raw())?;

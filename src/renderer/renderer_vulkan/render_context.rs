@@ -23,7 +23,7 @@ pub struct RenderContext {
 
 pub struct FrameState {
     pub in_flight_future: Option<FenceSignalFuture<Box<dyn GpuFuture>>>,
-    pub descriptor_set: Arc<DescriptorSet>,
+    pub descriptor_sets: Vec<Arc<DescriptorSet>>,
 }
 
 impl RenderContext {
@@ -86,7 +86,7 @@ impl RenderContext {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout(),
                 0,
-                self.frames[self.current_frame].descriptor_set.clone(),
+                self.frames[self.current_frame].descriptor_sets.clone(),
             )
             .with_context(|| "Failed to bind descriptor sets")?;
 
