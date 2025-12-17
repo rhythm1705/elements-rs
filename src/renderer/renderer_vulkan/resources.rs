@@ -7,23 +7,22 @@ use anyhow::Result;
 use glam::{Mat4, Vec2, Vec3};
 use image::ImageReader;
 use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
+use vulkano::image::Image;
 use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
 use vulkano::image::sampler::SamplerMipmapMode::Linear;
 use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
-use vulkano::image::Image;
 use vulkano::{
+    DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
-        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo,
-        PrimaryCommandBufferAbstract,
+        AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
+        allocator::StandardCommandBufferAllocator,
     },
-    descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
-    DeviceSize,
 };
 
 #[derive(BufferContents, Vertex, Clone, Copy)]
@@ -73,7 +72,6 @@ pub struct VulkanResources {
     meshes: Vec<RenderMesh>,
     textures: HashMap<String, Texture>,
     uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
-    pub(crate) descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
@@ -85,15 +83,12 @@ impl VulkanResources {
         command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     ) -> Self {
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
-        let descriptor_set_allocator =
-            StandardDescriptorSetAllocator::new(device.clone(), Default::default());
         Self {
             device,
             memory_allocator,
             meshes: Vec::new(),
             textures: HashMap::new(),
             uniform_buffers: Vec::new(),
-            descriptor_set_allocator: Arc::new(descriptor_set_allocator),
             graphics_queue,
             command_buffer_allocator,
         }
@@ -182,7 +177,12 @@ impl VulkanResources {
                 mag_filter: Filter::Linear,
                 min_filter: Filter::Linear,
                 address_mode: [SamplerAddressMode::Repeat; 3],
-                anisotropy: Some(self.device.physical_device().properties().max_sampler_anisotropy),
+                anisotropy: Some(
+                    self.device
+                        .physical_device()
+                        .properties()
+                        .max_sampler_anisotropy,
+                ),
                 border_color: IntOpaqueBlack,
                 mipmap_mode: Linear,
                 ..Default::default()

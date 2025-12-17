@@ -1,19 +1,29 @@
 use crate::renderer::renderer_vulkan::resources::VulkanResources;
-use crate::renderer::renderer_vulkan::{pipeline::VulkanPipeline, render_targets::RenderTargets, resources::UniformBufferObject, swapchain::VulkanSwapchain, MAX_FRAMES_IN_FLIGHT};
+use crate::renderer::renderer_vulkan::{
+    pipeline::VulkanPipeline, resources::UniformBufferObject, swapchain::VulkanSwapchain,
+    MAX_FRAMES_IN_FLIGHT,
+};
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
 use std::{sync::Arc, time::Instant};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
-use vulkano::command_buffer::{CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
+use vulkano::command_buffer::{CommandBufferUsage, RenderingAttachmentInfo, RenderingInfo};
 use vulkano::device::Queue;
 use vulkano::pipeline::PipelineBindPoint;
+use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
 use vulkano::swapchain::SwapchainPresentInfo;
-use vulkano::{buffer::Subbuffer, command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer}, descriptor_set::DescriptorSet, pipeline::graphics::viewport::Viewport, sync::{future::FenceSignalFuture, GpuFuture}, Validated, VulkanError};
+use vulkano::{
+    buffer::Subbuffer, command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
+    descriptor_set::DescriptorSet,
+    pipeline::graphics::viewport::Viewport,
+    sync::{future::FenceSignalFuture, GpuFuture},
+    Validated,
+    VulkanError,
+};
 
 pub struct RenderContext {
     pub swapchain: VulkanSwapchain,
     pub pipeline: VulkanPipeline,
-    pub render_targets: RenderTargets,
     pub viewport: Viewport,
     pub recreate_swapchain: bool,
     pub frames: Vec<FrameState>,
@@ -64,22 +74,19 @@ impl RenderContext {
             )?;
 
         builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![Some([0.0, 0.0, 0.0, 1.0].into())],
-                    ..RenderPassBeginInfo::framebuffer(
-                        self.render_targets
-                            .framebuffers(0)
-                            .with_context(|| "No framebuffers for render pass 0")?
-                            [image_index as usize]
-                            .clone(),
+            .begin_rendering(RenderingInfo {
+                render_area_extent: self.swapchain.extent,
+                layer_count: 1,
+                color_attachments: vec![Some(RenderingAttachmentInfo {
+                    load_op: AttachmentLoadOp::Clear,
+                    store_op: AttachmentStoreOp::Store,
+                    clear_value: Some([0.0, 0.0, 0.0, 1.0].into()),
+                    ..RenderingAttachmentInfo::image_view(
+                        self.swapchain.image_views[image_index as usize].clone(),
                     )
-                },
-                SubpassBeginInfo {
-                    contents: SubpassContents::Inline,
-                    ..Default::default()
-                },
-            )?
+                })],
+                ..Default::default()
+            })?
             .set_viewport(0, [self.viewport.clone()].into_iter().collect())?
             .bind_pipeline_graphics(self.pipeline.pipeline())?
             .bind_descriptor_sets(
@@ -123,14 +130,17 @@ impl<'a> ActiveFrame<'a> {
     }
 
     pub fn execute_command_buffer(&mut self, graphics_queue: &Arc<Queue>) -> Result<()> {
-        let mut builder = self.builder.take()
+        let mut builder = self
+            .builder
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Command buffer builder not initialized"))?;
-        builder.end_render_pass(SubpassEndInfo::default())?;
+        builder.end_rendering()?;
 
         let command_buffer = builder.build()?;
 
         // Build the future chain and obtain a fence future we can wait on next use of this slot.
-        let execution_future = self.acquire_future
+        let execution_future = self
+            .acquire_future
             .take()
             .ok_or_else(|| anyhow::anyhow!("Acquire future not complete"))?
             .then_execute(graphics_queue.clone(), command_buffer)?
