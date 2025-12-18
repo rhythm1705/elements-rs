@@ -3,14 +3,13 @@ pub(crate) use crate::{
     renderer::renderer_vulkan::{
         pipeline::VulkanPipeline,
         render_context::{ActiveFrame, RenderContext},
-        render_targets::RenderTargets,
         resources::{MyVertex, VulkanResources},
         swapchain::VulkanSwapchain,
     },
     resource_manager::ResourceManager,
     window::Window,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use glam::{Vec2, Vec3};
 use std::time::Duration;
 use std::{sync::Arc, thread, time::Instant};
@@ -18,6 +17,7 @@ use std::{sync::Arc, thread, time::Instant};
 use tracing::debug;
 use tracing::info;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo;
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::DeviceFeatures;
 #[cfg(debug_assertions)]
 use vulkano::instance::debug::{
@@ -25,23 +25,22 @@ use vulkano::instance::debug::{
     DebugUtilsMessengerCreateInfo,
 };
 use vulkano::{
-    command_buffer::allocator::StandardCommandBufferAllocator, descriptor_set::{DescriptorSet, WriteDescriptorSet}, device::{
-        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
-        QueueFlags,
+    Validated, VulkanError, VulkanLibrary,
+    command_buffer::allocator::StandardCommandBufferAllocator,
+    descriptor_set::{DescriptorSet, WriteDescriptorSet},
+    device::{
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDeviceType,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
     swapchain::Surface,
     sync::GpuFuture,
-    Validated,
-    VulkanError,
-    VulkanLibrary,
 };
 use winit::window::Window as WinitWindow;
 
 mod pipeline;
 mod render_context;
-mod render_targets;
 mod resources;
 mod shaders;
 mod swapchain;
@@ -81,6 +80,7 @@ pub struct VulkanRenderer {
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
     resources: VulkanResources,
     render_context: Option<RenderContext>,
 }
@@ -154,7 +154,7 @@ impl VulkanRenderer {
                 })
             }),
         )
-            .with_context(|| "Failed to create debug callback")?;
+        .with_context(|| "Failed to create debug callback")?;
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -176,7 +176,7 @@ impl VulkanRenderer {
                     .position(|(i, q)| {
                         q.queue_flags.intersects(QueueFlags::GRAPHICS)
                             && p.presentation_support(i as u32, &winit_window)
-                            .unwrap_or(false)
+                                .unwrap_or(false)
                     })
                     .map(|i| (p, i as u32))
             })
@@ -205,6 +205,7 @@ impl VulkanRenderer {
                     ..Default::default()
                 }],
                 enabled_features: DeviceFeatures {
+                    dynamic_rendering: true,
                     sampler_anisotropy: true,
                     ..Default::default()
                 },
@@ -216,6 +217,11 @@ impl VulkanRenderer {
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
             StandardCommandBufferAllocatorCreateInfo::default(),
+        ));
+
+        let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+            device.clone(),
+            Default::default(),
         ));
 
         let resources = VulkanResources::new(
@@ -232,6 +238,7 @@ impl VulkanRenderer {
             device,
             graphics_queue,
             command_buffer_allocator,
+            descriptor_set_allocator,
             resources,
             render_context: None,
         })
@@ -245,10 +252,6 @@ impl VulkanRenderer {
             VulkanSwapchain::new(self.device.clone(), surface.clone(), window_size.into())?;
 
         let pipeline = VulkanPipeline::new(self.device.clone(), swapchain.format)?;
-
-        let mut render_targets = RenderTargets::new(swapchain.images.clone());
-
-        render_targets.rebuild_for_pass(0, &pipeline.render_pass())?;
 
         let viewport = Viewport {
             offset: [0.0, 0.0],
@@ -277,10 +280,16 @@ impl VulkanRenderer {
                     .get_texture("Textures/tex1.jpg".as_ref())
                     .with_context(|| "Texture image view not found")?;
                 let set = DescriptorSet::new(
-                    self.resources.descriptor_set_allocator.clone(),
+                    self.descriptor_set_allocator.clone(),
                     pipeline.layout().set_layouts()[0].clone(),
-                    [WriteDescriptorSet::buffer(0, ubo),
-                        WriteDescriptorSet::image_view_sampler(1, img.image_view.clone(), img.sampler.clone())],
+                    [
+                        WriteDescriptorSet::buffer(0, ubo),
+                        WriteDescriptorSet::image_view_sampler(
+                            1,
+                            img.image_view.clone(),
+                            img.sampler.clone(),
+                        ),
+                    ],
                     [],
                 )?;
                 Ok(set)
@@ -301,7 +310,6 @@ impl VulkanRenderer {
         self.render_context = Some(RenderContext {
             swapchain,
             pipeline,
-            render_targets,
             viewport,
             recreate_swapchain,
             frames,
@@ -346,10 +354,6 @@ impl VulkanRenderer {
         // the dynamic state viewport.
         if rcx.recreate_swapchain {
             rcx.swapchain.recreate(window_size.into())?;
-            rcx.render_targets
-                .replace_images(rcx.swapchain.images.clone());
-            rcx.render_targets
-                .rebuild_for_pass(0, &rcx.pipeline.render_pass())?;
             rcx.viewport.extent = window_size.into();
             rcx.recreate_swapchain = false;
         }
@@ -379,7 +383,7 @@ impl VulkanRenderer {
                 .get_uniform_buffer(rcx.current_frame)
                 .with_context(|| "Uniform buffer not found")?,
         )
-            .with_context(|| "Failed to update uniform buffer")?;
+        .with_context(|| "Failed to update uniform buffer")?;
 
         match rcx.build_command_buffer(
             self.command_buffer_allocator.clone(),

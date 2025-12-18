@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use crate::renderer::renderer_vulkan::{
+    MyVertex,
+    shaders::{fs, vs},
+};
+use anyhow::{Result, anyhow};
+use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
 use vulkano::{
     descriptor_set::layout::{
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
@@ -9,50 +14,28 @@ use vulkano::{
     device::Device,
     format::Format,
     pipeline::{
+        DynamicState, GraphicsPipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         graphics::{
+            GraphicsPipelineCreateInfo,
             color_blend::{ColorBlendAttachmentState, ColorBlendState},
             input_assembly::InputAssemblyState,
             multisample::MultisampleState,
             rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState},
             vertex_input::{Vertex, VertexDefinition},
             viewport::ViewportState,
-            GraphicsPipelineCreateInfo,
-        }, layout::PipelineLayoutCreateInfo, DynamicState, GraphicsPipeline, Pipeline,
-        PipelineLayout,
-        PipelineShaderStageCreateInfo,
+        },
+        layout::PipelineLayoutCreateInfo,
     },
-    render_pass::{RenderPass, Subpass},
     shader::ShaderStages,
-};
-
-use crate::renderer::renderer_vulkan::{
-    shaders::{fs, vs},
-    MyVertex,
 };
 
 pub struct VulkanPipeline {
     pipeline: Arc<GraphicsPipeline>,
-    render_pass: Arc<RenderPass>,
+    // render_pass: Arc<RenderPass>,
 }
 
 impl VulkanPipeline {
     pub fn new(device: Arc<Device>, format: Format) -> Result<Self> {
-        let render_pass = vulkano::single_pass_renderpass!(
-            device.clone(),
-            attachments: {
-                color: {
-                    format: format,
-                    samples: 1,
-                    load_op: Clear,
-                    store_op: Store,
-                },
-            },
-            pass: {
-                color: [color],
-                depth_stencil: {},
-            },
-        )?;
-
         let pipeline = {
             let vs = vs::load(device.clone())?
                 .entry_point("main")
@@ -102,8 +85,10 @@ impl VulkanPipeline {
                 },
             )?;
 
-            let subpass = Subpass::from(render_pass.clone(), 0)
-                .ok_or_else(|| anyhow!("Subpass 0 not found"))?;
+            let pipeline_rendering_create_info = PipelineRenderingCreateInfo {
+                color_attachment_formats: vec![Some(format)],
+                ..Default::default()
+            };
 
             // Finally, create the pipeline.
             GraphicsPipeline::new(
@@ -129,32 +114,31 @@ impl VulkanPipeline {
                     // framebuffer. The default value overwrites the old value with the new one,
                     // without any blending.
                     color_blend_state: Some(ColorBlendState::with_attachment_states(
-                        subpass.num_color_attachments(),
+                        pipeline_rendering_create_info
+                            .color_attachment_formats
+                            .len() as u32,
                         ColorBlendAttachmentState::default(),
                     )),
                     // Dynamic states allows us to specify parts of the pipeline settings when
                     // recording the command buffer, before we perform drawing. Here, we specify
                     // that the viewport should be dynamic.
                     dynamic_state: [DynamicState::Viewport].into_iter().collect(),
-                    subpass: Some(subpass.into()),
+                    subpass: Some(pipeline_rendering_create_info.into()),
                     ..GraphicsPipelineCreateInfo::layout(layout)
                 },
             )?
         };
 
-        Ok(VulkanPipeline {
-            pipeline,
-            render_pass,
-        })
+        Ok(VulkanPipeline { pipeline })
     }
 
     pub fn pipeline(&self) -> Arc<GraphicsPipeline> {
         self.pipeline.clone()
     }
 
-    pub fn render_pass(&self) -> Arc<RenderPass> {
-        self.render_pass.clone()
-    }
+    // pub fn render_pass(&self) -> Arc<RenderPass> {
+    //     self.render_pass.clone()
+    // }
 
     pub fn layout(&self) -> Arc<PipelineLayout> {
         self.pipeline.layout().clone()

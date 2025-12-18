@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
+use anyhow::{Result, anyhow};
+use vulkano::image::view::ImageView;
 use vulkano::{
-    device::Device, format::Format,
+    Validated, VulkanError,
+    device::Device,
+    format::Format,
     image::{Image, ImageUsage},
     swapchain::{
-        acquire_next_image, ColorSpace, Surface, Swapchain, SwapchainAcquireFuture,
-        SwapchainCreateInfo,
+        ColorSpace, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
+        acquire_next_image,
     },
-    Validated,
-    VulkanError,
 };
-
-use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
 
 // TODO: Implement querying swapchain support details
 // struct SwapchainSupportDetails {
@@ -24,8 +24,8 @@ use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
 pub struct VulkanSwapchain {
     pub swapchain: Arc<Swapchain>,
     // support_details: SwapchainSupportDetails,
-    // pub surface: Arc<Surface>,
     pub images: Vec<Arc<Image>>,
+    pub image_views: Vec<Arc<ImageView>>,
     pub format: Format,
     pub extent: [u32; 2],
 }
@@ -82,13 +82,15 @@ impl VulkanSwapchain {
             )?
         };
 
+        let image_views = VulkanSwapchain::create_image_views(&images)?;
+
         let format = swapchain.image_format();
         let extent = swapchain.image_extent();
 
         Ok(VulkanSwapchain {
             swapchain,
-            // surface,
             images,
+            image_views,
             format,
             extent,
         })
@@ -101,6 +103,7 @@ impl VulkanSwapchain {
         })?;
         self.swapchain = new_swapchain;
         self.images = new_images;
+        self.image_views = VulkanSwapchain::create_image_views(&self.images)?;
         self.extent = window_size;
         Ok(())
     }
@@ -109,6 +112,17 @@ impl VulkanSwapchain {
         &self,
     ) -> Result<(u32, bool, SwapchainAcquireFuture), Validated<VulkanError>> {
         Ok(acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap)?)
+    }
+
+    fn create_image_views(images: &[Arc<Image>]) -> Result<Vec<Arc<ImageView>>> {
+        let image_views = images
+            .iter()
+            .map(|image| {
+                ImageView::new_default(image.clone())
+                    .map_err(|e| anyhow!("Failed to create image view: {:?}", e))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(image_views)
     }
 
     // TODO: Implement present function

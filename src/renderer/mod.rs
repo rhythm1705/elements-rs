@@ -34,7 +34,8 @@ impl Renderer {
 
     pub fn on_update(&mut self) {
         if let Some(vk) = &mut self.vk_renderer {
-            vk.draw_frame().unwrap_or_else(|e| panic!("Failed to draw frame: {:?}", e));
+            vk.draw_frame()
+                .unwrap_or_else(|e| panic!("Failed to draw frame: {:?}", e));
         }
     }
 }
