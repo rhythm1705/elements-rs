@@ -9,7 +9,7 @@ pub(crate) use crate::{
     resource_manager::ResourceManager,
     window::Window,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use glam::{Vec2, Vec3};
 use std::time::Duration;
 use std::{sync::Arc, thread, time::Instant};
@@ -25,17 +25,17 @@ use vulkano::instance::debug::{
     DebugUtilsMessengerCreateInfo,
 };
 use vulkano::{
-    command_buffer::allocator::StandardCommandBufferAllocator, descriptor_set::{DescriptorSet, WriteDescriptorSet}, device::{
-        physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
-        QueueFlags,
+    Validated, VulkanError, VulkanLibrary,
+    command_buffer::allocator::StandardCommandBufferAllocator,
+    descriptor_set::{DescriptorSet, WriteDescriptorSet},
+    device::{
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDeviceType,
     },
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
     swapchain::Surface,
     sync::GpuFuture,
-    Validated,
-    VulkanError,
-    VulkanLibrary,
 };
 use winit::window::Window as WinitWindow;
 

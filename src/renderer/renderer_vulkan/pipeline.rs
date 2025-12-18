@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use crate::renderer::renderer_vulkan::{
-    shaders::{fs, vs},
     MyVertex,
+    shaders::{fs, vs},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
 use vulkano::{
     descriptor_set::layout::{
@@ -14,19 +14,18 @@ use vulkano::{
     device::Device,
     format::Format,
     pipeline::{
+        DynamicState, GraphicsPipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         graphics::{
+            GraphicsPipelineCreateInfo,
             color_blend::{ColorBlendAttachmentState, ColorBlendState},
             input_assembly::InputAssemblyState,
             multisample::MultisampleState,
             rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState},
             vertex_input::{Vertex, VertexDefinition},
             viewport::ViewportState,
-            GraphicsPipelineCreateInfo,
-        }, layout::PipelineLayoutCreateInfo, DynamicState, GraphicsPipeline, Pipeline,
-        PipelineLayout,
-        PipelineShaderStageCreateInfo,
-    }
-    ,
+        },
+        layout::PipelineLayoutCreateInfo,
+    },
     shader::ShaderStages,
 };
 

@@ -1,7 +1,7 @@
 use crate::renderer::renderer_vulkan::resources::VulkanResources;
 use crate::renderer::renderer_vulkan::{
-    pipeline::VulkanPipeline, resources::UniformBufferObject, swapchain::VulkanSwapchain,
-    MAX_FRAMES_IN_FLIGHT,
+    MAX_FRAMES_IN_FLIGHT, pipeline::VulkanPipeline, resources::UniformBufferObject,
+    swapchain::VulkanSwapchain,
 };
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
@@ -13,12 +13,12 @@ use vulkano::pipeline::PipelineBindPoint;
 use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
 use vulkano::swapchain::SwapchainPresentInfo;
 use vulkano::{
-    buffer::Subbuffer, command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
+    Validated, VulkanError,
+    buffer::Subbuffer,
+    command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::DescriptorSet,
     pipeline::graphics::viewport::Viewport,
-    sync::{future::FenceSignalFuture, GpuFuture},
-    Validated,
-    VulkanError,
+    sync::{GpuFuture, future::FenceSignalFuture},
 };
 
 pub struct RenderContext {

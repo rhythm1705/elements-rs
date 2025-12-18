@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
+use anyhow::{Result, anyhow};
+use vulkano::image::view::ImageView;
 use vulkano::{
-    device::Device, format::Format,
+    Validated, VulkanError,
+    device::Device,
+    format::Format,
     image::{Image, ImageUsage},
     swapchain::{
-        acquire_next_image, ColorSpace, Surface, Swapchain, SwapchainAcquireFuture,
-        SwapchainCreateInfo,
+        ColorSpace, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
+        acquire_next_image,
     },
-    Validated,
-    VulkanError,
 };
-use vulkano::image::view::ImageView;
-use crate::renderer::renderer_vulkan::MAX_FRAMES_IN_FLIGHT;
 
 // TODO: Implement querying swapchain support details
 // struct SwapchainSupportDetails {
@@ -81,7 +81,7 @@ impl VulkanSwapchain {
                 },
             )?
         };
-        
+
         let image_views = VulkanSwapchain::create_image_views(&images)?;
 
         let format = swapchain.image_format();
@@ -113,7 +113,7 @@ impl VulkanSwapchain {
     ) -> Result<(u32, bool, SwapchainAcquireFuture), Validated<VulkanError>> {
         Ok(acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap)?)
     }
-    
+
     fn create_image_views(images: &[Arc<Image>]) -> Result<Vec<Arc<ImageView>>> {
         let image_views = images
             .iter()
