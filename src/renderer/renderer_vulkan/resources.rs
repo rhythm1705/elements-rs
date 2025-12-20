@@ -3,15 +3,16 @@ use std::path::Path;
 use std::sync::Arc;
 use vulkano::image::sampler::SamplerAddressMode;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use glam::{Mat4, Vec2, Vec3};
 use image::ImageReader;
 use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
-use vulkano::image::Image;
+use vulkano::format::{Format, FormatFeatures};
 use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
 use vulkano::image::sampler::SamplerMipmapMode::Linear;
 use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
+use vulkano::image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage};
 use vulkano::{
     DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -32,8 +33,8 @@ pub struct MyVertex {
     // The `name` attribute can be used to specify shader input names to match.
     // By default, the field-name is used.
     #[name("inPosition")]
-    #[format(R32G32_SFLOAT)]
-    pub position: Vec2,
+    #[format(R32G32B32_SFLOAT)]
+    pub position: Vec3,
 
     #[name("inColor")]
     #[format(R32G32B32_SFLOAT)]
@@ -70,6 +71,7 @@ pub struct VulkanResources {
     device: Arc<Device>,
     memory_allocator: Arc<StandardMemoryAllocator>,
     meshes: Vec<RenderMesh>,
+    depth_resource: Option<Arc<ImageView>>,
     textures: HashMap<String, Texture>,
     uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
     graphics_queue: Arc<Queue>,
@@ -87,6 +89,7 @@ impl VulkanResources {
             device,
             memory_allocator,
             meshes: Vec::new(),
+            depth_resource: None,
             textures: HashMap::new(),
             uniform_buffers: Vec::new(),
             graphics_queue,
@@ -143,15 +146,13 @@ impl VulkanResources {
 
         let texture_image = Image::new(
             self.memory_allocator.clone(),
-            vulkano::image::ImageCreateInfo {
-                image_type: vulkano::image::ImageType::Dim2d,
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
                 format: vulkano::format::Format::R8G8B8A8_SRGB,
                 extent: [width, height, 1],
                 mip_levels: 1,
                 array_layers: 1,
-                samples: vulkano::image::SampleCount::Sample1,
-                usage: vulkano::image::ImageUsage::TRANSFER_DST
-                    | vulkano::image::ImageUsage::SAMPLED,
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -189,6 +190,77 @@ impl VulkanResources {
             },
         )?;
         Ok(sampler)
+    }
+
+    pub fn create_depth_resources(&mut self, extent: [u32; 2]) -> Result<()> {
+        let depth_format = self.find_depth_format()?;
+
+        let depth_image = Image::new(
+            self.memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: depth_format,
+                extent: [extent[0], extent[1], 1],
+                mip_levels: 1,
+                array_layers: 1,
+                usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSIENT_ATTACHMENT,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )?;
+
+        let depth_image_view = ImageView::new_default(depth_image.clone())?;
+        self.depth_resource = Some(depth_image_view);
+        Ok(())
+    }
+
+    pub fn get_depth_resources(&self) -> Result<Arc<ImageView>> {
+        self.depth_resource
+            .as_ref()
+            .cloned()
+            .ok_or(anyhow!("Depth resources not created"))
+    }
+
+    fn find_supported_format(
+        &self,
+        candidates: &[Format],
+        tiling: ImageTiling,
+        features: FormatFeatures,
+    ) -> Result<Format> {
+        for &format in candidates {
+            let properties = self.device.physical_device().format_properties(format);
+            let supported = match tiling {
+                ImageTiling::Linear => properties?.linear_tiling_features.intersects(features),
+                ImageTiling::Optimal => properties?.optimal_tiling_features.intersects(features),
+                _ => false,
+            };
+            if supported {
+                return Ok(format);
+            }
+        }
+        Err(anyhow!("No supported format found"))
+    }
+
+    pub fn find_depth_format(&self) -> Result<Format> {
+        self.find_supported_format(
+            &[
+                Format::D32_SFLOAT,
+                Format::D32_SFLOAT_S8_UINT,
+                Format::D24_UNORM_S8_UINT,
+            ],
+            ImageTiling::Optimal,
+            FormatFeatures::DEPTH_STENCIL_ATTACHMENT,
+        )
+    }
+
+    fn _has_stencil_component(&self, format: Format) -> bool {
+        matches!(
+            format,
+            Format::D32_SFLOAT_S8_UINT | Format::D24_UNORM_S8_UINT
+        )
     }
 
     fn copy_buffer_to_image<T: BufferContents + Clone>(

@@ -6,9 +6,13 @@ use crate::renderer::renderer_vulkan::{
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
 use std::{sync::Arc, time::Instant};
+use tracing::error;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{CommandBufferUsage, RenderingAttachmentInfo, RenderingInfo};
 use vulkano::device::Queue;
+use vulkano::format::ClearValue;
+use vulkano::image::ImageLayout::DepthAttachmentOptimal;
+use vulkano::image::view::ImageView;
 use vulkano::pipeline::PipelineBindPoint;
 use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
 use vulkano::swapchain::SwapchainPresentInfo;
@@ -64,6 +68,7 @@ impl RenderContext {
         &mut self,
         command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
         graphics_queue: Arc<Queue>,
+        depth_image_view: Arc<ImageView>,
         image_index: u32,
     ) -> Result<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>> {
         let mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> =
@@ -73,22 +78,36 @@ impl RenderContext {
                 CommandBufferUsage::OneTimeSubmit,
             )?;
 
+        let clear_color = ClearValue::Float([0.0, 0.0, 0.0, 1.0]);
+        let clear_depth = ClearValue::DepthStencil((1.0, 0));
+
+        let color_attachments = vec![Some(RenderingAttachmentInfo {
+            load_op: AttachmentLoadOp::Clear,
+            store_op: AttachmentStoreOp::Store,
+            clear_value: Some(clear_color),
+            ..RenderingAttachmentInfo::image_view(
+                self.swapchain.image_views[image_index as usize].clone(),
+            )
+        })];
+
+        let depth_attachment = Some(RenderingAttachmentInfo {
+            load_op: AttachmentLoadOp::Clear,
+            store_op: AttachmentStoreOp::DontCare,
+            clear_value: Some(clear_depth),
+            image_layout: DepthAttachmentOptimal,
+            ..RenderingAttachmentInfo::image_view(depth_image_view.clone())
+        });
+
         builder
             .begin_rendering(RenderingInfo {
                 render_area_extent: self.swapchain.extent,
                 layer_count: 1,
-                color_attachments: vec![Some(RenderingAttachmentInfo {
-                    load_op: AttachmentLoadOp::Clear,
-                    store_op: AttachmentStoreOp::Store,
-                    clear_value: Some([0.0, 0.0, 0.0, 1.0].into()),
-                    ..RenderingAttachmentInfo::image_view(
-                        self.swapchain.image_views[image_index as usize].clone(),
-                    )
-                })],
+                color_attachments,
+                depth_attachment,
                 ..Default::default()
             })?
-            .set_viewport(0, [self.viewport.clone()].into_iter().collect())?
             .bind_pipeline_graphics(self.pipeline.pipeline())?
+            .set_viewport(0, [self.viewport.clone()].into_iter().collect())?
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout(),
@@ -171,6 +190,19 @@ impl<'a> ActiveFrame<'a> {
 
 impl Drop for ActiveFrame<'_> {
     fn drop(&mut self) {
-        self.rcx.current_frame = (self.rcx.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        // It is important to call this function from time to time, otherwise resources
+        // will keep accumulating, and you will eventually reach an out of memory error.
+        // Calling this function polls various fences in order to determine what the GPU
+        // has already processed, and frees the resources that are no longer needed.
+        if let Some(fence_future) = self.rcx.frames[self.rcx.current_frame]
+            .in_flight_future
+            .as_mut()
+        {
+            fence_future
+                .wait(None)
+                .unwrap_or_else(|e| error!("Failed to wait for fence future: {:?}", e)); // ensure safe reuse of this slot's UBO
+            fence_future.cleanup_finished();
+            self.rcx.current_frame = (self.rcx.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        }
     }
 }

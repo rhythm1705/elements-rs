@@ -5,6 +5,7 @@ use crate::renderer::renderer_vulkan::{
     shaders::{fs, vs},
 };
 use anyhow::{Result, anyhow};
+use vulkano::pipeline::graphics::depth_stencil::{CompareOp, DepthState, DepthStencilState};
 use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
 use vulkano::{
     descriptor_set::layout::{
@@ -31,11 +32,10 @@ use vulkano::{
 
 pub struct VulkanPipeline {
     pipeline: Arc<GraphicsPipeline>,
-    // render_pass: Arc<RenderPass>,
 }
 
 impl VulkanPipeline {
-    pub fn new(device: Arc<Device>, format: Format) -> Result<Self> {
+    pub fn new(device: Arc<Device>, format: Format, depth_format: Format) -> Result<Self> {
         let pipeline = {
             let vs = vs::load(device.clone())?
                 .entry_point("main")
@@ -87,7 +87,16 @@ impl VulkanPipeline {
 
             let pipeline_rendering_create_info = PipelineRenderingCreateInfo {
                 color_attachment_formats: vec![Some(format)],
+                depth_attachment_format: Some(depth_format),
                 ..Default::default()
+            };
+
+            let depth_stencil_state = DepthStencilState {
+                depth: Some(DepthState {
+                    write_enable: true,
+                    compare_op: CompareOp::LessOrEqual,
+                }),
+                ..DepthStencilState::default()
             };
 
             // Finally, create the pipeline.
@@ -119,6 +128,7 @@ impl VulkanPipeline {
                             .len() as u32,
                         ColorBlendAttachmentState::default(),
                     )),
+                    depth_stencil_state: Some(depth_stencil_state),
                     // Dynamic states allows us to specify parts of the pipeline settings when
                     // recording the command buffer, before we perform drawing. Here, we specify
                     // that the viewport should be dynamic.

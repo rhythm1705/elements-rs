@@ -14,17 +14,8 @@ use vulkano::{
     },
 };
 
-// TODO: Implement querying swapchain support details
-// struct SwapchainSupportDetails {
-//     capabilities: SurfaceCapabilities,
-//     formats: Vec<Format>,
-//     present_modes: Vec<PresentMode>,
-// }
-
 pub struct VulkanSwapchain {
     pub swapchain: Arc<Swapchain>,
-    // support_details: SwapchainSupportDetails,
-    pub images: Vec<Arc<Image>>,
     pub image_views: Vec<Arc<ImageView>>,
     pub format: Format,
     pub extent: [u32; 2],
@@ -89,7 +80,6 @@ impl VulkanSwapchain {
 
         Ok(VulkanSwapchain {
             swapchain,
-            images,
             image_views,
             format,
             extent,
@@ -102,8 +92,7 @@ impl VulkanSwapchain {
             ..self.swapchain.create_info()
         })?;
         self.swapchain = new_swapchain;
-        self.images = new_images;
-        self.image_views = VulkanSwapchain::create_image_views(&self.images)?;
+        self.image_views = VulkanSwapchain::create_image_views(new_images.as_slice())?;
         self.extent = window_size;
         Ok(())
     }
