@@ -47,30 +47,50 @@ mod swapchain;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-const VERTICES: [MyVertex; 4] = [
+const VERTICES: [MyVertex; 8] = [
     MyVertex {
-        position: Vec2::new(-0.5, -0.5),
+        position: Vec3::new(-0.5, -0.5, 0.0),
         color: Vec3::new(1.0, 0.0, 0.0),
         tex_coord: Vec2::new(1.0, 0.0),
     },
     MyVertex {
-        position: Vec2::new(0.5, -0.5),
+        position: Vec3::new(0.5, -0.5, 0.0),
         color: Vec3::new(0.0, 1.0, 0.0),
         tex_coord: Vec2::new(0.0, 0.0),
     },
     MyVertex {
-        position: Vec2::new(0.5, 0.5),
+        position: Vec3::new(0.5, 0.5, 0.0),
         color: Vec3::new(0.0, 0.0, 1.0),
         tex_coord: Vec2::new(0.0, 1.0),
     },
     MyVertex {
-        position: Vec2::new(-0.5, 0.5),
+        position: Vec3::new(-0.5, 0.5, 0.0),
+        color: Vec3::new(1.0, 1.0, 1.0),
+        tex_coord: Vec2::new(1.0, 1.0),
+    },
+    MyVertex {
+        position: Vec3::new(-0.5, -0.5, -0.5),
+        color: Vec3::new(1.0, 0.0, 0.0),
+        tex_coord: Vec2::new(1.0, 0.0),
+    },
+    MyVertex {
+        position: Vec3::new(0.5, -0.5, -0.5),
+        color: Vec3::new(0.0, 1.0, 0.0),
+        tex_coord: Vec2::new(0.0, 0.0),
+    },
+    MyVertex {
+        position: Vec3::new(0.5, 0.5, -0.5),
+        color: Vec3::new(0.0, 0.0, 1.0),
+        tex_coord: Vec2::new(0.0, 1.0),
+    },
+    MyVertex {
+        position: Vec3::new(-0.5, 0.5, -0.5),
         color: Vec3::new(1.0, 1.0, 1.0),
         tex_coord: Vec2::new(1.0, 1.0),
     },
 ];
 
-const INDICES: [u32; 6] = [0, 1, 2, 2, 3, 0];
+const INDICES: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
@@ -86,8 +106,8 @@ pub struct VulkanRenderer {
 }
 
 impl VulkanRenderer {
-    pub fn new(resources: &ResourceManager) -> Result<VulkanRenderer> {
-        let winit_window = resources.get::<Window>().get_winit_window();
+    pub fn new(resources_manager: &ResourceManager) -> Result<VulkanRenderer> {
+        let winit_window = resources_manager.get::<Window>().get_winit_window();
 
         let vk_lib = VulkanLibrary::new()?;
 
@@ -251,7 +271,13 @@ impl VulkanRenderer {
         let swapchain =
             VulkanSwapchain::new(self.device.clone(), surface.clone(), window_size.into())?;
 
-        let pipeline = VulkanPipeline::new(self.device.clone(), swapchain.format)?;
+        self.resources.create_depth_resources(swapchain.extent)?;
+
+        let pipeline = VulkanPipeline::new(
+            self.device.clone(),
+            swapchain.format,
+            self.resources.find_depth_format()?,
+        )?;
 
         let viewport = Viewport {
             offset: [0.0, 0.0],
@@ -340,20 +366,13 @@ impl VulkanRenderer {
             return Ok(());
         }
 
-        // It is important to call this function from time to time, otherwise resources
-        // will keep accumulating, and you will eventually reach an out of memory error.
-        // Calling this function polls various fences in order to determine what the GPU
-        // has already processed, and frees the resources that are no longer needed.
-        if let Some(fence_future) = rcx.frames[rcx.current_frame].in_flight_future.as_mut() {
-            fence_future.wait(None)?; // ensure safe reuse of this slot's UBO
-            fence_future.cleanup_finished();
-        }
-
         // Whenever the window resizes we need to recreate everything dependent on the
         // window size. In this example that includes the swapchain, the framebuffers and
         // the dynamic state viewport.
         if rcx.recreate_swapchain {
             rcx.swapchain.recreate(window_size.into())?;
+            self.resources
+                .create_depth_resources(rcx.swapchain.extent)?;
             rcx.viewport.extent = window_size.into();
             rcx.recreate_swapchain = false;
         }
@@ -388,6 +407,7 @@ impl VulkanRenderer {
         match rcx.build_command_buffer(
             self.command_buffer_allocator.clone(),
             self.graphics_queue.clone(),
+            self.resources.get_depth_resources()?,
             image_index,
         ) {
             Ok(builder) => {
