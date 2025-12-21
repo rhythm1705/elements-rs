@@ -190,19 +190,20 @@ impl<'a> ActiveFrame<'a> {
 
 impl Drop for ActiveFrame<'_> {
     fn drop(&mut self) {
-        // It is important to call this function from time to time, otherwise resources
-        // will keep accumulating, and you will eventually reach an out of memory error.
-        // Calling this function polls various fences in order to determine what the GPU
-        // has already processed, and frees the resources that are no longer needed.
         if let Some(fence_future) = self.rcx.frames[self.rcx.current_frame]
             .in_flight_future
             .as_mut()
         {
-            fence_future
-                .wait(None)
-                .unwrap_or_else(|e| error!("Failed to wait for fence future: {:?}", e)); // ensure safe reuse of this slot's UBO
-            fence_future.cleanup_finished();
-            self.rcx.current_frame = (self.rcx.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+            match fence_future.wait(None) {
+                Ok(()) => {
+                    // Fence successfully waited: we can safely clean up and advance to the next frame.
+                    fence_future.cleanup_finished();
+                    self.rcx.current_frame = (self.rcx.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+                }
+                Err(e) => {
+                    error!("Failed to wait for fence future: {:?}", e);
+                }
+            }
         }
     }
 }

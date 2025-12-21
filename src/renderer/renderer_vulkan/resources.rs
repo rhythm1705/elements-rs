@@ -203,7 +203,7 @@ impl VulkanResources {
                 extent: [extent[0], extent[1], 1],
                 mip_levels: 1,
                 array_layers: 1,
-                usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSIENT_ATTACHMENT,
+                usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT,
                 ..Default::default()
             },
             AllocationCreateInfo {
