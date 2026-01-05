@@ -17,6 +17,7 @@ all = "deny"
 [dependencies]
 anyhow = "1.0.99"
 glam = { version = "0.30.9", features = ["bytemuck"] }
+gltf = "1.4.1"
 image = "0.25.9"
 # Compile out debug/info logs in release builds while keeping them in debug builds.
 # (debug_assertions is enabled for dev/profile dev builds.)

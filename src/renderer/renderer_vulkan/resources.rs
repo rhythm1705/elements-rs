@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map};
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
 use vulkano::image::sampler::SamplerAddressMode;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use glam::{Mat4, Vec2, Vec3};
 use image::ImageReader;
 use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
@@ -26,23 +28,76 @@ use vulkano::{
     sync::GpuFuture,
 };
 
-#[derive(BufferContents, Vertex, Clone, Copy)]
 #[repr(C)]
-pub struct MyVertex {
+#[derive(BufferContents, PartialEq, Clone, Copy)]
+pub struct ElmVec3(Vec3);
+
+impl Deref for ElmVec3 {
+    type Target = glam::Vec3;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<glam::Vec3> for ElmVec3 {
+    fn from(v: glam::Vec3) -> Self {
+        Self(v)
+    }
+}
+
+impl Eq for ElmVec3 {}
+
+impl Hash for ElmVec3 {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for f in &self.to_array() {
+            f.to_bits().hash(state);
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(BufferContents, PartialEq, Clone, Copy)]
+pub struct ElmVec2(Vec2);
+
+impl Deref for ElmVec2 {
+    type Target = glam::Vec2;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec2> for ElmVec2 {
+    fn from(v: Vec2) -> Self {
+        Self(v)
+    }
+}
+
+impl Eq for ElmVec2 {}
+impl Hash for ElmVec2 {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for f in &self.to_array() {
+            f.to_bits().hash(state);
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(BufferContents, Vertex, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct ElmVertex {
     // Every field needs to explicitly state the desired shader input format
     // The `name` attribute can be used to specify shader input names to match.
     // By default, the field-name is used.
     #[name("inPosition")]
     #[format(R32G32B32_SFLOAT)]
-    pub position: Vec3,
+    pub position: ElmVec3,
 
     #[name("inColor")]
     #[format(R32G32B32_SFLOAT)]
-    pub color: Vec3,
+    pub color: ElmVec3,
 
     #[name("inTexCoord")]
     #[format(R32G32_SFLOAT)]
-    pub tex_coord: Vec2,
+    pub tex_coord: ElmVec2,
 }
 
 #[derive(BufferContents, Clone, Copy, Default)]
@@ -54,7 +109,7 @@ pub struct UniformBufferObject {
 }
 
 pub struct RenderMesh {
-    pub vertex_buffer: Subbuffer<[MyVertex]>,
+    pub vertex_buffer: Subbuffer<[ElmVertex]>,
     pub index_buffer: Subbuffer<[u32]>,
     pub _vertex_count: u32,
     pub index_count: u32,
@@ -97,7 +152,7 @@ impl VulkanResources {
         }
     }
 
-    pub fn create_mesh(&mut self, vertices: &mut [MyVertex], indices: &[u32]) -> Result<usize> {
+    pub fn create_mesh(&mut self, vertices: &mut [ElmVertex], indices: &[u32]) -> Result<usize> {
         let vertex_buffer = self.create_vertex_buffer(vertices)?;
         let index_buffer = self.create_index_buffer(indices)?;
 
@@ -113,6 +168,59 @@ impl VulkanResources {
 
     pub fn get_mesh(&self, mesh_id: usize) -> Option<&RenderMesh> {
         self.meshes.get(mesh_id)
+    }
+
+    pub fn load_model(&mut self, path: &Path) -> Result<()> {
+        let (model, buffers, _) =
+            gltf::import(path).with_context(|| format!("Path {:?} could not be loaded.", path))?;
+        let mut unique_vertices = HashMap::<ElmVertex, u32>::new();
+        for mesh in model.meshes() {
+            for primitive in mesh.primitives() {
+                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+                let indices: Vec<u32> = reader
+                    .read_indices()
+                    .ok_or(anyhow!("No indices in mesh"))?
+                    .into_u32()
+                    .collect();
+                let positions: Vec<[f32; 3]> = reader
+                    .read_positions()
+                    .ok_or(anyhow!("No positions in mesh"))?
+                    .collect();
+                let tex_coords: Option<Vec<[f32; 2]>> =
+                    reader.read_tex_coords(0).map(|tc| tc.into_f32().collect());
+
+                let mut vertices: Vec<ElmVertex> = Vec::new();
+
+                for i in 0..positions.len() {
+                    let position = ElmVec3::from(Vec3::from(positions[i]));
+                    let tex_coord = if let Some(ref tcs) = tex_coords {
+                        ElmVec2::from(Vec2::from(tcs[i]))
+                    } else {
+                        ElmVec2::from(Vec2::new(0.0, 0.0))
+                    };
+                    let color = ElmVec3::from(Vec3::new(1.0, 1.0, 1.0)); // Default white color
+
+                    let vertex = ElmVertex {
+                        position,
+                        color,
+                        tex_coord,
+                    };
+
+                    if let hash_map::Entry::Vacant(e) = unique_vertices.entry(vertex) {
+                        let new_index = vertices.len() as u32;
+                        e.insert(new_index);
+                        vertices.push(vertex);
+                    }
+                }
+
+                if vertices.is_empty() {
+                    continue; // Skip empty meshes
+                }
+
+                self.create_mesh(&mut vertices, &indices)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn create_texture(&mut self, path: &Path) -> Result<()> {
@@ -274,10 +382,10 @@ impl VulkanResources {
         Ok(())
     }
 
-    fn create_vertex_buffer(&self, vertices: &[MyVertex]) -> Result<Subbuffer<[MyVertex]>> {
+    fn create_vertex_buffer(&self, vertices: &[ElmVertex]) -> Result<Subbuffer<[ElmVertex]>> {
         let staging_buffer = self.create_staging_buffer(vertices)?;
 
-        let vertex_buffer = Buffer::new_slice::<MyVertex>(
+        let vertex_buffer = Buffer::new_slice::<ElmVertex>(
             self.memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER | BufferUsage::TRANSFER_DST,

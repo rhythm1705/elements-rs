@@ -3,19 +3,19 @@ pub(crate) use crate::{
     renderer::renderer_vulkan::{
         pipeline::VulkanPipeline,
         render_context::{ActiveFrame, RenderContext},
-        resources::{MyVertex, VulkanResources},
+        resources::{ElmVertex, VulkanResources},
         swapchain::VulkanSwapchain,
     },
     resource_manager::ResourceManager,
     window::Window,
 };
 use anyhow::{Context, Result, anyhow};
-use glam::{Vec2, Vec3};
+// use glam::{Vec2, Vec3};
 use std::time::Duration;
 use std::{sync::Arc, thread, time::Instant};
 #[cfg(debug_assertions)]
 use tracing::debug;
-use tracing::info;
+use tracing::{Level, info, span};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo;
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::DeviceFeatures;
@@ -47,50 +47,53 @@ mod swapchain;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-const VERTICES: [MyVertex; 8] = [
-    MyVertex {
-        position: Vec3::new(-0.5, -0.5, 0.0),
-        color: Vec3::new(1.0, 0.0, 0.0),
-        tex_coord: Vec2::new(1.0, 0.0),
-    },
-    MyVertex {
-        position: Vec3::new(0.5, -0.5, 0.0),
-        color: Vec3::new(0.0, 1.0, 0.0),
-        tex_coord: Vec2::new(0.0, 0.0),
-    },
-    MyVertex {
-        position: Vec3::new(0.5, 0.5, 0.0),
-        color: Vec3::new(0.0, 0.0, 1.0),
-        tex_coord: Vec2::new(0.0, 1.0),
-    },
-    MyVertex {
-        position: Vec3::new(-0.5, 0.5, 0.0),
-        color: Vec3::new(1.0, 1.0, 1.0),
-        tex_coord: Vec2::new(1.0, 1.0),
-    },
-    MyVertex {
-        position: Vec3::new(-0.5, -0.5, -0.5),
-        color: Vec3::new(1.0, 0.0, 0.0),
-        tex_coord: Vec2::new(1.0, 0.0),
-    },
-    MyVertex {
-        position: Vec3::new(0.5, -0.5, -0.5),
-        color: Vec3::new(0.0, 1.0, 0.0),
-        tex_coord: Vec2::new(0.0, 0.0),
-    },
-    MyVertex {
-        position: Vec3::new(0.5, 0.5, -0.5),
-        color: Vec3::new(0.0, 0.0, 1.0),
-        tex_coord: Vec2::new(0.0, 1.0),
-    },
-    MyVertex {
-        position: Vec3::new(-0.5, 0.5, -0.5),
-        color: Vec3::new(1.0, 1.0, 1.0),
-        tex_coord: Vec2::new(1.0, 1.0),
-    },
-];
+// const VERTICES: [ElmVertex; 8] = [
+//     ElmVertex {
+//         position: Vec3::new(-0.5, -0.5, 0.0),
+//         color: Vec3::new(1.0, 0.0, 0.0),
+//         tex_coord: Vec2::new(1.0, 0.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(0.5, -0.5, 0.0),
+//         color: Vec3::new(0.0, 1.0, 0.0),
+//         tex_coord: Vec2::new(0.0, 0.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(0.5, 0.5, 0.0),
+//         color: Vec3::new(0.0, 0.0, 1.0),
+//         tex_coord: Vec2::new(0.0, 1.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(-0.5, 0.5, 0.0),
+//         color: Vec3::new(1.0, 1.0, 1.0),
+//         tex_coord: Vec2::new(1.0, 1.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(-0.5, -0.5, -0.5),
+//         color: Vec3::new(1.0, 0.0, 0.0),
+//         tex_coord: Vec2::new(1.0, 0.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(0.5, -0.5, -0.5),
+//         color: Vec3::new(0.0, 1.0, 0.0),
+//         tex_coord: Vec2::new(0.0, 0.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(0.5, 0.5, -0.5),
+//         color: Vec3::new(0.0, 0.0, 1.0),
+//         tex_coord: Vec2::new(0.0, 1.0),
+//     },
+//     ElmVertex {
+//         position: Vec3::new(-0.5, 0.5, -0.5),
+//         color: Vec3::new(1.0, 1.0, 1.0),
+//         tex_coord: Vec2::new(1.0, 1.0),
+//     },
+// ];
 
-const INDICES: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+// const INDICES: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+
+const MODEL_PATH: &str = "models/super_car/scene.gltf";
+const TEXTURE_PATH: &str = "textures/SuperCar_baseColor.png";
 
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
@@ -285,12 +288,12 @@ impl VulkanRenderer {
             depth_range: 0.0..=1.0,
         };
 
-        self.resources
-            .create_texture("Textures/tex1.jpg".as_ref())?;
+        self.resources.create_texture(TEXTURE_PATH.as_ref())?;
 
-        let mut vertices = VERTICES;
-        let indices = INDICES;
-        self.resources.create_mesh(&mut vertices, &indices)?;
+        // let mut vertices = VERTICES;
+        // let indices = INDICES;
+        // self.resources.create_mesh(&mut vertices, &indices)?;
+        self.resources.load_model(MODEL_PATH.as_ref())?;
 
         self.resources
             .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
@@ -303,7 +306,7 @@ impl VulkanRenderer {
                     .with_context(|| format!("Uniform buffer {i} not found"))?;
                 let img = self
                     .resources
-                    .get_texture("Textures/tex1.jpg".as_ref())
+                    .get_texture(TEXTURE_PATH.as_ref())
                     .with_context(|| "Texture image view not found")?;
                 let set = DescriptorSet::new(
                     self.descriptor_set_allocator.clone(),
@@ -346,15 +349,22 @@ impl VulkanRenderer {
     }
 
     pub fn draw_frame(&mut self) -> Result<()> {
-        let is_minimized = self.winit_window.is_minimized();
-        let window_size = self.winit_window.inner_size();
-
         let rcx = match self.render_context.as_mut() {
             Some(rcx) => rcx,
             None => {
                 return Err(anyhow!("Render context not initialized"));
             }
         };
+
+        let is_minimized = self.winit_window.is_minimized();
+        let window_size = self.winit_window.inner_size();
+
+        let _span_draw_frame = span!(
+            Level::INFO,
+            "VulkanRenderer::draw_frame",
+            FrameIndex = rcx.current_frame
+        )
+        .entered();
 
         if is_minimized.is_some_and(|minimized| minimized)
             || window_size.width == 0
@@ -370,6 +380,10 @@ impl VulkanRenderer {
         // window size. In this example that includes the swapchain, the framebuffers and
         // the dynamic state viewport.
         if rcx.recreate_swapchain {
+            info!(
+                "Recreating swapchain for new window size: {:?}",
+                window_size
+            );
             rcx.swapchain.recreate(window_size.into())?;
             self.resources
                 .create_depth_resources(rcx.swapchain.extent)?;
@@ -393,6 +407,7 @@ impl VulkanRenderer {
         };
 
         if suboptimal {
+            info!("Swapchain is suboptimal; recreating");
             rcx.recreate_swapchain = true;
             return Ok(());
         }

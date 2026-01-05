@@ -105,7 +105,8 @@ impl RenderContext {
                 color_attachments,
                 depth_attachment,
                 ..Default::default()
-            })?
+            })
+            .with_context(|| "Begin rendering")?
             .bind_pipeline_graphics(self.pipeline.pipeline())?
             .set_viewport(0, [self.viewport.clone()].into_iter().collect())?
             .bind_descriptor_sets(
@@ -114,7 +115,7 @@ impl RenderContext {
                 0,
                 self.frames[self.current_frame].descriptor_sets.clone(),
             )
-            .with_context(|| "Failed to bind descriptor sets")?;
+            .with_context(|| "Bind descriptor sets")?;
 
         Ok(builder)
     }
