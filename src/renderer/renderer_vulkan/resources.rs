@@ -1,18 +1,13 @@
-use std::collections::{HashMap, hash_map};
-use std::hash::{Hash, Hasher};
-use std::ops::Deref;
-use std::path::Path;
+pub(crate) use crate::core::ubo::UniformBufferObject;
+pub(crate) use crate::core::vertex::ElmVertex;
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
-use vulkano::image::sampler::SamplerAddressMode;
-
-use anyhow::{Context, Result, anyhow};
-use glam::{Mat4, Vec2, Vec3};
-use image::ImageReader;
 use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
 use vulkano::format::{Format, FormatFeatures};
 use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
 use vulkano::image::sampler::SamplerMipmapMode::Linear;
-use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
+use vulkano::image::sampler::{Filter, SamplerAddressMode};
+use vulkano::image::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
 use vulkano::image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage};
 use vulkano::{
@@ -24,100 +19,17 @@ use vulkano::{
     },
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
 };
 
-#[repr(C)]
-#[derive(BufferContents, PartialEq, Clone, Copy)]
-pub struct ElmVec3(Vec3);
-
-impl Deref for ElmVec3 {
-    type Target = glam::Vec3;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<glam::Vec3> for ElmVec3 {
-    fn from(v: glam::Vec3) -> Self {
-        Self(v)
-    }
-}
-
-impl Eq for ElmVec3 {}
-
-impl Hash for ElmVec3 {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for f in &self.to_array() {
-            f.to_bits().hash(state);
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(BufferContents, PartialEq, Clone, Copy)]
-pub struct ElmVec2(Vec2);
-
-impl Deref for ElmVec2 {
-    type Target = glam::Vec2;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<Vec2> for ElmVec2 {
-    fn from(v: Vec2) -> Self {
-        Self(v)
-    }
-}
-
-impl Eq for ElmVec2 {}
-impl Hash for ElmVec2 {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for f in &self.to_array() {
-            f.to_bits().hash(state);
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(BufferContents, Vertex, Clone, Copy, Hash, Eq, PartialEq)]
-pub struct ElmVertex {
-    // Every field needs to explicitly state the desired shader input format
-    // The `name` attribute can be used to specify shader input names to match.
-    // By default, the field-name is used.
-    #[name("inPosition")]
-    #[format(R32G32B32_SFLOAT)]
-    pub position: ElmVec3,
-
-    #[name("inColor")]
-    #[format(R32G32B32_SFLOAT)]
-    pub color: ElmVec3,
-
-    #[name("inTexCoord")]
-    #[format(R32G32_SFLOAT)]
-    pub tex_coord: ElmVec2,
-}
-
-#[derive(BufferContents, Clone, Copy, Default)]
-#[repr(C)]
-pub struct UniformBufferObject {
-    pub model: Mat4,
-    pub view: Mat4,
-    pub proj: Mat4,
-}
-
-pub struct RenderMesh {
+pub struct GPUMesh {
     pub vertex_buffer: Subbuffer<[ElmVertex]>,
     pub index_buffer: Subbuffer<[u32]>,
     pub _vertex_count: u32,
     pub index_count: u32,
 }
 
-#[allow(dead_code)]
-pub struct Texture {
-    pub image: Arc<Image>,
+pub struct GPUTexture {
     pub image_view: Arc<ImageView>,
     pub sampler: Arc<Sampler>,
 }
@@ -125,10 +37,10 @@ pub struct Texture {
 pub struct VulkanResources {
     device: Arc<Device>,
     memory_allocator: Arc<StandardMemoryAllocator>,
-    meshes: Vec<RenderMesh>,
-    depth_resource: Option<Arc<ImageView>>,
-    textures: HashMap<String, Texture>,
-    uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
+    pub meshes: Vec<GPUMesh>,
+    pub textures: Vec<GPUTexture>,
+    pub depth_resource: Option<Arc<ImageView>>,
+    pub uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
@@ -144,119 +56,70 @@ impl VulkanResources {
             device,
             memory_allocator,
             meshes: Vec::new(),
+            textures: Vec::new(),
             depth_resource: None,
-            textures: HashMap::new(),
             uniform_buffers: Vec::new(),
             graphics_queue,
             command_buffer_allocator,
         }
     }
 
-    pub fn create_mesh(&mut self, vertices: &mut [ElmVertex], indices: &[u32]) -> Result<usize> {
+    pub fn upload_mesh(&mut self, vertices: &[ElmVertex], indices: &[u32]) -> Result<()> {
         let vertex_buffer = self.create_vertex_buffer(vertices)?;
         let index_buffer = self.create_index_buffer(indices)?;
 
-        let mesh = RenderMesh {
+        let mesh = GPUMesh {
             _vertex_count: vertices.len() as u32,
             index_count: indices.len() as u32,
             vertex_buffer,
             index_buffer,
         };
         self.meshes.push(mesh);
-        Ok(self.meshes.len() - 1)
+        Ok(())
     }
 
-    pub fn get_mesh(&self, mesh_id: usize) -> Option<&RenderMesh> {
+    pub fn get_mesh(&self, mesh_id: usize) -> Option<&GPUMesh> {
         self.meshes.get(mesh_id)
     }
 
-    pub fn load_model(&mut self, path: &Path) -> Result<()> {
-        let (model, buffers, _) =
-            gltf::import(path).with_context(|| format!("Path {:?} could not be loaded.", path))?;
-        let mut unique_vertices = HashMap::<ElmVertex, u32>::new();
-        for mesh in model.meshes() {
-            for primitive in mesh.primitives() {
-                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                let indices: Vec<u32> = reader
-                    .read_indices()
-                    .ok_or(anyhow!("No indices in mesh"))?
-                    .into_u32()
-                    .collect();
-                let positions: Vec<[f32; 3]> = reader
-                    .read_positions()
-                    .ok_or(anyhow!("No positions in mesh"))?
-                    .collect();
-                let tex_coords: Option<Vec<[f32; 2]>> =
-                    reader.read_tex_coords(0).map(|tc| tc.into_f32().collect());
+    pub fn upload_texture(
+        &mut self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+        mag_filter: Filter,
+        min_filter: Filter,
+        address_mode: [SamplerAddressMode; 3],
+    ) -> Result<()> {
+        let image = self.create_texture_image(image_data, width, height)?;
+        let image_view = self.create_texture_image_view(image)?;
+        let sampler = self.create_texture_sampler(mag_filter, min_filter, address_mode)?;
 
-                let mut vertices: Vec<ElmVertex> = Vec::new();
-
-                for i in 0..positions.len() {
-                    let position = ElmVec3::from(Vec3::from(positions[i]));
-                    let tex_coord = if let Some(ref tcs) = tex_coords {
-                        ElmVec2::from(Vec2::from(tcs[i]))
-                    } else {
-                        ElmVec2::from(Vec2::new(0.0, 0.0))
-                    };
-                    let color = ElmVec3::from(Vec3::new(1.0, 1.0, 1.0)); // Default white color
-
-                    let vertex = ElmVertex {
-                        position,
-                        color,
-                        tex_coord,
-                    };
-
-                    if let hash_map::Entry::Vacant(e) = unique_vertices.entry(vertex) {
-                        let new_index = vertices.len() as u32;
-                        e.insert(new_index);
-                        vertices.push(vertex);
-                    }
-                }
-
-                if vertices.is_empty() {
-                    continue; // Skip empty meshes
-                }
-
-                self.create_mesh(&mut vertices, &indices)?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn create_texture(&mut self, path: &Path) -> Result<()> {
-        let path_str = path.to_string_lossy().to_string();
-        if self.textures.contains_key(&path_str) {
-            return Ok(());
-        }
-
-        let image = self.create_texture_image(path)?;
-        let image_view = self.create_texture_image_view(image.clone())?;
-        let sampler = self.create_texture_sampler()?;
-
-        let texture = Texture {
-            image,
+        let texture = GPUTexture {
             image_view,
             sampler,
         };
-        self.textures.insert(path_str, texture);
+        self.textures.push(texture);
         Ok(())
     }
 
-    pub fn get_texture(&self, path: &Path) -> Option<&Texture> {
-        let path_str = path.to_string_lossy().to_string();
-        self.textures.get(&path_str)
+    pub fn get_texture(&self, texture_id: usize) -> Option<&GPUTexture> {
+        self.textures.get(texture_id)
     }
 
-    fn create_texture_image(&self, path: &Path) -> Result<Arc<Image>> {
-        let img = ImageReader::open(path)?.decode()?.to_rgba8();
-        let (width, height) = img.dimensions();
-        let staging_buffer = self.create_staging_buffer(&img.into_raw())?;
+    fn create_texture_image(
+        &self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<Arc<Image>> {
+        let staging_buffer = self.create_staging_buffer(image_data)?;
 
         let texture_image = Image::new(
             self.memory_allocator.clone(),
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
-                format: vulkano::format::Format::R8G8B8A8_SRGB,
+                format: Format::R8G8B8A8_SRGB,
                 extent: [width, height, 1],
                 mip_levels: 1,
                 array_layers: 1,
@@ -279,13 +142,18 @@ impl VulkanResources {
         Ok(image_view)
     }
 
-    fn create_texture_sampler(&self) -> Result<Arc<Sampler>> {
+    fn create_texture_sampler(
+        &self,
+        mag_filter: Filter,
+        min_filter: Filter,
+        address_mode: [SamplerAddressMode; 3],
+    ) -> Result<Arc<Sampler>> {
         let sampler = Sampler::new(
             self.device.clone(),
             SamplerCreateInfo {
-                mag_filter: Filter::Linear,
-                min_filter: Filter::Linear,
-                address_mode: [SamplerAddressMode::Repeat; 3],
+                mag_filter,
+                min_filter,
+                address_mode,
                 anisotropy: Some(
                     self.device
                         .physical_device()

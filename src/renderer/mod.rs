@@ -1,47 +1,23 @@
-use crate::{renderer::renderer_vulkan::VulkanRenderer, resource_manager::ResourceManager};
+use crate::core::vertex::ElmVertex;
+use crate::resource_manager::ResourceManager;
+use anyhow::Result;
+use gltf::texture::{MagFilter, MinFilter, WrappingMode};
 
 pub mod renderer_vulkan;
 
-pub struct Renderer {
-    vk_renderer: Option<VulkanRenderer>,
-}
-
-impl Renderer {
-    pub fn new() -> Renderer {
-        Renderer { vk_renderer: None }
-    }
-
-    pub fn run(&mut self, resources: &mut ResourceManager) {
-        match VulkanRenderer::new(resources) {
-            Ok(vk) => {
-                self.vk_renderer = Some(vk);
-            }
-            Err(e) => {
-                panic!("Could not initialize vulkan renderer: {:?}", e);
-            }
-        }
-
-        let init_result = if let Some(vk) = self.vk_renderer.as_mut() {
-            vk.initialize_render_context()
-        } else {
-            panic!("Vulkan renderer not available; skipping render context initialization");
-        };
-
-        if let Err(e) = init_result {
-            panic!("Failed to initialize render context: {:?}", e);
-        }
-    }
-
-    pub fn on_update(&mut self) {
-        if let Some(vk) = &mut self.vk_renderer {
-            vk.draw_frame()
-                .unwrap_or_else(|e| panic!("Failed to draw frame: {:?}", e));
-        }
-    }
-}
-
-impl Default for Renderer {
-    fn default() -> Self {
-        Self::new()
-    }
+pub trait Renderer {
+    fn new(resource_manager: &mut ResourceManager) -> Self
+    where
+        Self: std::marker::Sized;
+    fn run(&mut self) -> Result<()>;
+    fn on_update(&mut self) -> Result<()>;
+    fn upload_mesh(&mut self, vertices: &[ElmVertex], indices: &[u32]) -> Result<()>;
+    fn upload_texture(
+        &mut self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+        filter: (Option<MagFilter>, Option<MinFilter>),
+        wrap: (WrappingMode, WrappingMode),
+    ) -> Result<()>;
 }

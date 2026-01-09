@@ -1,0 +1,8 @@
+Model Information:
+* title:	Super Car
+* source:	https://sketchfab.com/3d-models/super-car-c104a0a24ccf4bb7a3f589cc091c4ae0
+* author:	Han66st (https://sketchfab.com/Han66st)
+
+Model License:
+* license type:	SKETCHFAB Standard (https://sketchfab.com/licenses)
+* requirements:	Under basic restrictions, use worldwide, on all types of media, commercially or not, and in all types of derivative works

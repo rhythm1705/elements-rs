@@ -1,3 +1,4 @@
+use crate::renderer::Renderer;
 use crate::renderer::renderer_vulkan::render_context::FrameState;
 pub(crate) use crate::{
     renderer::renderer_vulkan::{
@@ -10,7 +11,7 @@ pub(crate) use crate::{
     window::Window,
 };
 use anyhow::{Context, Result, anyhow};
-// use glam::{Vec2, Vec3};
+use gltf::texture::{MagFilter, MinFilter, WrappingMode};
 use std::time::Duration;
 use std::{sync::Arc, thread, time::Instant};
 #[cfg(debug_assertions)]
@@ -19,6 +20,7 @@ use tracing::{Level, info, span};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo;
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::DeviceFeatures;
+use vulkano::image::sampler::{Filter, SamplerAddressMode};
 #[cfg(debug_assertions)]
 use vulkano::instance::debug::{
     DebugUtilsMessageSeverity, DebugUtilsMessenger, DebugUtilsMessengerCallback,
@@ -41,59 +43,11 @@ use winit::window::Window as WinitWindow;
 
 mod pipeline;
 mod render_context;
-mod resources;
+pub mod resources;
 mod shaders;
 mod swapchain;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-
-// const VERTICES: [ElmVertex; 8] = [
-//     ElmVertex {
-//         position: Vec3::new(-0.5, -0.5, 0.0),
-//         color: Vec3::new(1.0, 0.0, 0.0),
-//         tex_coord: Vec2::new(1.0, 0.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(0.5, -0.5, 0.0),
-//         color: Vec3::new(0.0, 1.0, 0.0),
-//         tex_coord: Vec2::new(0.0, 0.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(0.5, 0.5, 0.0),
-//         color: Vec3::new(0.0, 0.0, 1.0),
-//         tex_coord: Vec2::new(0.0, 1.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(-0.5, 0.5, 0.0),
-//         color: Vec3::new(1.0, 1.0, 1.0),
-//         tex_coord: Vec2::new(1.0, 1.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(-0.5, -0.5, -0.5),
-//         color: Vec3::new(1.0, 0.0, 0.0),
-//         tex_coord: Vec2::new(1.0, 0.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(0.5, -0.5, -0.5),
-//         color: Vec3::new(0.0, 1.0, 0.0),
-//         tex_coord: Vec2::new(0.0, 0.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(0.5, 0.5, -0.5),
-//         color: Vec3::new(0.0, 0.0, 1.0),
-//         tex_coord: Vec2::new(0.0, 1.0),
-//     },
-//     ElmVertex {
-//         position: Vec3::new(-0.5, 0.5, -0.5),
-//         color: Vec3::new(1.0, 1.0, 1.0),
-//         tex_coord: Vec2::new(1.0, 1.0),
-//     },
-// ];
-
-// const INDICES: [u32; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
-
-const MODEL_PATH: &str = "models/super_car/scene.gltf";
-const TEXTURE_PATH: &str = "textures/SuperCar_baseColor.png";
 
 pub struct VulkanRenderer {
     winit_window: Arc<WinitWindow>,
@@ -104,15 +58,15 @@ pub struct VulkanRenderer {
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
-    resources: VulkanResources,
+    pub resources: VulkanResources,
     render_context: Option<RenderContext>,
 }
 
-impl VulkanRenderer {
-    pub fn new(resources_manager: &ResourceManager) -> Result<VulkanRenderer> {
-        let winit_window = resources_manager.get::<Window>().get_winit_window();
+impl Renderer for VulkanRenderer {
+    fn new(resource_manager: &mut ResourceManager) -> Self {
+        let winit_window = resource_manager.get::<Window>().get_winit_window();
 
-        let vk_lib = VulkanLibrary::new()?;
+        let vk_lib = VulkanLibrary::new().unwrap();
 
         let enable_validation = cfg!(debug_assertions);
 
@@ -121,7 +75,7 @@ impl VulkanRenderer {
         } else {
             Vec::new()
         };
-        let mut required_extensions = Surface::required_extensions(&winit_window)?;
+        let mut required_extensions = Surface::required_extensions(&winit_window).unwrap();
         if enable_validation {
             required_extensions.ext_debug_utils = true;
             info!("Vulkan validation layers enabled");
@@ -135,7 +89,8 @@ impl VulkanRenderer {
                 enabled_extensions: required_extensions,
                 ..Default::default()
             },
-        )?;
+        )
+        .unwrap();
 
         #[cfg(debug_assertions)]
         let _debug_callback = DebugUtilsMessenger::new(
@@ -177,7 +132,8 @@ impl VulkanRenderer {
                 })
             }),
         )
-        .with_context(|| "Failed to create debug callback")?;
+        .with_context(|| "Failed to create debug callback")
+        .unwrap();
 
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
@@ -185,7 +141,8 @@ impl VulkanRenderer {
         };
 
         let (physical_device, queue_family_index) = instance
-            .enumerate_physical_devices()?
+            .enumerate_physical_devices()
+            .unwrap()
             .filter(|p| p.supported_extensions().contains(&device_extensions))
             .filter_map(|p| {
                 info!(
@@ -211,7 +168,8 @@ impl VulkanRenderer {
                 PhysicalDeviceType::Other => 4,
                 _ => 5,
             })
-            .with_context(|| "No suitable physical device found")?;
+            .with_context(|| "No suitable physical device found")
+            .unwrap();
 
         info!(
             "Using device: {} (type: {:?})",
@@ -234,8 +192,12 @@ impl VulkanRenderer {
                 },
                 ..Default::default()
             },
-        )?;
-        let graphics_queue: Arc<Queue> = queues_iter.next().with_context(|| "No queue found")?;
+        )
+        .unwrap();
+        let graphics_queue: Arc<Queue> = queues_iter
+            .next()
+            .with_context(|| "No queue found")
+            .unwrap();
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
@@ -253,7 +215,7 @@ impl VulkanRenderer {
             command_buffer_allocator.clone(),
         );
 
-        Ok(VulkanRenderer {
+        VulkanRenderer {
             winit_window,
             instance,
             #[cfg(debug_assertions)]
@@ -264,10 +226,10 @@ impl VulkanRenderer {
             descriptor_set_allocator,
             resources,
             render_context: None,
-        })
+        }
     }
 
-    pub fn initialize_render_context(&mut self) -> Result<()> {
+    fn run(&mut self) -> Result<()> {
         let surface = Surface::from_window(self.instance.clone(), self.winit_window.clone())?;
         let window_size = self.winit_window.inner_size();
 
@@ -288,37 +250,31 @@ impl VulkanRenderer {
             depth_range: 0.0..=1.0,
         };
 
-        self.resources.create_texture(TEXTURE_PATH.as_ref())?;
-
-        // let mut vertices = VERTICES;
-        // let indices = INDICES;
-        // self.resources.create_mesh(&mut vertices, &indices)?;
-        self.resources.load_model(MODEL_PATH.as_ref())?;
-
         self.resources
             .create_uniform_buffers(MAX_FRAMES_IN_FLIGHT)?;
 
         let descriptor_set = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|i| {
+                let mut descriptor_writes = vec![];
+
                 let ubo = self
                     .resources
                     .get_uniform_buffer(i)
                     .with_context(|| format!("Uniform buffer {i} not found"))?;
-                let img = self
-                    .resources
-                    .get_texture(TEXTURE_PATH.as_ref())
-                    .with_context(|| "Texture image view not found")?;
+                descriptor_writes.push(WriteDescriptorSet::buffer(0, ubo));
+
+                for texture in self.resources.textures.iter() {
+                    descriptor_writes.push(WriteDescriptorSet::image_view_sampler(
+                        descriptor_writes.len() as u32,
+                        texture.image_view.clone(),
+                        texture.sampler.clone(),
+                    ));
+                }
+
                 let set = DescriptorSet::new(
                     self.descriptor_set_allocator.clone(),
                     pipeline.layout().set_layouts()[0].clone(),
-                    [
-                        WriteDescriptorSet::buffer(0, ubo),
-                        WriteDescriptorSet::image_view_sampler(
-                            1,
-                            img.image_view.clone(),
-                            img.sampler.clone(),
-                        ),
-                    ],
+                    descriptor_writes,
                     [],
                 )?;
                 Ok(set)
@@ -348,7 +304,7 @@ impl VulkanRenderer {
         Ok(())
     }
 
-    pub fn draw_frame(&mut self) -> Result<()> {
+    fn on_update(&mut self) -> Result<()> {
         let rcx = match self.render_context.as_mut() {
             Some(rcx) => rcx,
             None => {
@@ -433,9 +389,7 @@ impl VulkanRenderer {
                     image_index,
                     acquire_future: Some(acquire_future.boxed()),
                 };
-                active_frame
-                    .draw_mesh(0)
-                    .with_context(|| "Failed to draw mesh")?;
+                active_frame.draw().with_context(|| "Failed to draw mesh")?;
                 active_frame
                     .execute_command_buffer(&self.graphics_queue)
                     .with_context(|| "Failed to execute command buffer")?;
@@ -443,5 +397,53 @@ impl VulkanRenderer {
             }
             Err(err) => Err(anyhow!("Failed to build command buffer: {}", err)),
         }
+    }
+
+    fn upload_mesh(&mut self, vertices: &[ElmVertex], indices: &[u32]) -> Result<()> {
+        self.resources.upload_mesh(vertices, indices)?;
+        Ok(())
+    }
+
+    fn upload_texture(
+        &mut self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+        filter: (Option<MagFilter>, Option<MinFilter>),
+        wrap: (WrappingMode, WrappingMode),
+    ) -> Result<()> {
+        // Do mapping of filtering and wrapping modes to Vulkan
+        let vk_mag_filter = match filter.0 {
+            Some(MagFilter::Nearest) => Filter::Nearest,
+            Some(MagFilter::Linear) | None => Filter::Linear,
+        };
+        let vk_min_filter = match filter.1 {
+            Some(MinFilter::Nearest) => Filter::Nearest,
+            Some(MinFilter::Linear) => Filter::Linear,
+            _ => Filter::Linear, // Simplified for brevity
+        };
+        let vk_address_mode_s = match wrap.0 {
+            WrappingMode::ClampToEdge => SamplerAddressMode::ClampToEdge,
+            WrappingMode::MirroredRepeat => SamplerAddressMode::MirroredRepeat,
+            WrappingMode::Repeat => SamplerAddressMode::Repeat,
+        };
+        let vk_address_mode_t = match wrap.1 {
+            WrappingMode::ClampToEdge => SamplerAddressMode::ClampToEdge,
+            WrappingMode::MirroredRepeat => SamplerAddressMode::MirroredRepeat,
+            WrappingMode::Repeat => SamplerAddressMode::Repeat,
+        };
+        self.resources.upload_texture(
+            image_data,
+            width,
+            height,
+            vk_mag_filter,
+            vk_min_filter,
+            [
+                vk_address_mode_s,
+                vk_address_mode_t,
+                SamplerAddressMode::Repeat,
+            ],
+        )?;
+        Ok(())
     }
 }

@@ -1,16 +1,18 @@
-use std::sync::Arc;
-
+use crate::asset_loader::gltf_model::GltfModel;
+use crate::renderer::renderer_vulkan::VulkanRenderer;
 use crate::{
-    input::Input, logger::Logger, renderer::Renderer, resource_manager::ResourceManager,
-    window::Window,
+    asset_loader::AssetLoader, input::Input, logger::Logger, renderer::Renderer,
+    resource_manager::ResourceManager, window::Window,
 };
+use std::sync::Arc;
+use tracing::{debug, error};
 use winit::event::WindowEvent;
 use winit::window::Window as WinitWindow;
 
 pub struct Application {
     resources: ResourceManager,
     _logger: Logger,
-    renderer: Renderer,
+    renderer: Option<Box<dyn Renderer>>,
 }
 
 impl Application {
@@ -18,17 +20,19 @@ impl Application {
         let _logger = Logger::new();
         let mut resources = ResourceManager::new();
         resources.add(Input::new());
-        let renderer = Renderer::new();
+        resources.add(AssetLoader::new());
         Application {
             resources,
             _logger,
-            renderer,
+            renderer: None,
         }
     }
 
     pub fn set_window(&mut self, window: Arc<WinitWindow>) {
         let app_window = Window::new(window);
         self.resources.add(app_window);
+        let renderer = VulkanRenderer::new(&mut self.resources);
+        self.renderer = Some(Box::new(renderer));
     }
 
     pub fn handle_window_event(&mut self, event: WindowEvent) {
@@ -61,13 +65,53 @@ impl Application {
     }
 
     pub fn run(&mut self) {
-        self.renderer.run(&mut self.resources);
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("Renderer must be initialized before running the application");
+        let asset_loader = self.resources.get_mut::<AssetLoader>();
+        let handle = asset_loader.load::<GltfModel>("super_car.scene");
+        if let Ok(handle) = handle {
+            let model = handle.read();
+            // info!("Model: {:?}", model);
+            for mesh in model.meshes.iter() {
+                for primitive in mesh.primitives.iter() {
+                    // debug!("Mesh {} Primitive {}: {:?}", i, j, primitive);
+                    if let Err(e) = renderer.upload_mesh(&primitive.vertices, &primitive.indices) {
+                        error!("Failed to upload mesh: {:?}", e);
+                    }
+                }
+            }
+            for texture in model.textures.iter() {
+                debug!("Texture: {:?}", texture);
+                if let Some(index) = texture.image {
+                    let image = &model.images[index];
+                    if let Err(e) = renderer.upload_texture(
+                        &image.pixels,
+                        image.width,
+                        image.height,
+                        (texture.sampler.mag_filter, texture.sampler.min_filter),
+                        (texture.sampler.wrap_s, texture.sampler.wrap_t),
+                    ) {
+                        error!("Failed to upload texture: {:?}", e);
+                    }
+                }
+            }
+        } else {
+            error!("Failed to load super_car.scene: {:?}", handle);
+        }
+
+        renderer.run().unwrap();
     }
 
     pub fn on_update(&mut self) {
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("Renderer must be initialized before updating the application");
         let start_time = std::time::Instant::now();
 
-        self.renderer.on_update();
+        renderer.on_update().unwrap();
 
         {
             let window = self.resources.get_mut::<Window>();

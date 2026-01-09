@@ -130,22 +130,21 @@ pub struct ActiveFrame<'a> {
 }
 
 impl<'a> ActiveFrame<'a> {
-    pub fn draw_mesh(&mut self, mesh_index: usize) -> Result<()> {
-        let mesh = self
-            .resources
-            .get_mesh(mesh_index)
-            .with_context(|| format!("Mesh {mesh_index} not found"))?;
-        if let Some(ref mut builder) = self.builder {
-            builder
-                .bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
-                .bind_index_buffer(mesh.index_buffer.clone())?;
-            // We add a draw command.
-            unsafe {
-                builder.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
-            };
-        } else {
-            return Err(anyhow::anyhow!("Command buffer builder not initialized"));
+    pub fn draw(&mut self) -> Result<()> {
+        for mesh in &self.resources.meshes {
+            if let Some(ref mut builder) = self.builder {
+                builder
+                    .bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
+                    .bind_index_buffer(mesh.index_buffer.clone())?;
+                // We add a draw command.
+                unsafe {
+                    builder.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
+                };
+            } else {
+                return Err(anyhow::anyhow!("Command buffer builder not initialized"));
+            }
         }
+
         Ok(())
     }
 
