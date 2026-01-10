@@ -58,15 +58,27 @@ pub struct VulkanRenderer {
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
-    pub resources: VulkanResources,
+    resources: VulkanResources,
     render_context: Option<RenderContext>,
 }
 
+impl VulkanRenderer {
+    pub fn resources(&self) -> &VulkanResources {
+        &self.resources
+    }
+
+    pub fn resources_mut(&mut self) -> &mut VulkanResources {
+        &mut self.resources
+    }
+}
 impl Renderer for VulkanRenderer {
     fn new(resource_manager: &mut ResourceManager) -> Self {
         let winit_window = resource_manager.get::<Window>().get_winit_window();
 
-        let vk_lib = VulkanLibrary::new().unwrap();
+        let vk_lib = match VulkanLibrary::new() {
+            Ok(lib) => lib,
+            Err(err) => panic!("Failed to load Vulkan library: {err}"),
+        };
 
         let enable_validation = cfg!(debug_assertions);
 
@@ -263,9 +275,10 @@ impl Renderer for VulkanRenderer {
                     .with_context(|| format!("Uniform buffer {i} not found"))?;
                 descriptor_writes.push(WriteDescriptorSet::buffer(0, ubo));
 
-                for texture in self.resources.textures.iter() {
+                for (tex_index, texture) in self.resources.textures.iter().enumerate() {
+                    let binding = 1 + tex_index as u32;
                     descriptor_writes.push(WriteDescriptorSet::image_view_sampler(
-                        descriptor_writes.len() as u32,
+                        binding,
                         texture.image_view.clone(),
                         texture.sampler.clone(),
                     ));

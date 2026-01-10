@@ -10,7 +10,9 @@ pub struct AssetLoader {
 impl AssetLoader {
     pub fn new() -> Self {
         AssetLoader {
-            cache: AssetCache::new("assets").expect("Failed to create asset cache"),
+            cache: AssetCache::new("assets").unwrap_or_else(|err| {
+                panic!("Failed to create asset cache for 'assets': {err}");
+            }),
         }
     }
 }
