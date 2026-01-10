@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::renderer::renderer_vulkan::{
-    MyVertex,
+    ElmVertex,
     shaders::{fs, vs},
 };
 use anyhow::{Result, anyhow};
@@ -44,7 +44,7 @@ impl VulkanPipeline {
                 .entry_point("main")
                 .ok_or(anyhow!("No main entry point in fragment shader"))?;
 
-            let vertex_input_state = MyVertex::per_vertex().definition(&vs)?;
+            let vertex_input_state = ElmVertex::per_vertex().definition(&vs)?;
 
             let stages = [
                 PipelineShaderStageCreateInfo::new(vs),

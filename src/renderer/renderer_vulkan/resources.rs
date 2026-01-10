@@ -1,16 +1,13 @@
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
-use vulkano::image::sampler::SamplerAddressMode;
-
+pub(crate) use crate::core::ubo::UniformBufferObject;
+pub(crate) use crate::core::vertex::ElmVertex;
 use anyhow::{Result, anyhow};
-use glam::{Mat4, Vec2, Vec3};
-use image::ImageReader;
+use std::sync::Arc;
 use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
 use vulkano::format::{Format, FormatFeatures};
 use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
 use vulkano::image::sampler::SamplerMipmapMode::Linear;
-use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
+use vulkano::image::sampler::{Filter, SamplerAddressMode};
+use vulkano::image::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
 use vulkano::image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage};
 use vulkano::{
@@ -22,47 +19,17 @@ use vulkano::{
     },
     device::{Device, Queue},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::graphics::vertex_input::Vertex,
     sync::GpuFuture,
 };
 
-#[derive(BufferContents, Vertex, Clone, Copy)]
-#[repr(C)]
-pub struct MyVertex {
-    // Every field needs to explicitly state the desired shader input format
-    // The `name` attribute can be used to specify shader input names to match.
-    // By default, the field-name is used.
-    #[name("inPosition")]
-    #[format(R32G32B32_SFLOAT)]
-    pub position: Vec3,
-
-    #[name("inColor")]
-    #[format(R32G32B32_SFLOAT)]
-    pub color: Vec3,
-
-    #[name("inTexCoord")]
-    #[format(R32G32_SFLOAT)]
-    pub tex_coord: Vec2,
-}
-
-#[derive(BufferContents, Clone, Copy, Default)]
-#[repr(C)]
-pub struct UniformBufferObject {
-    pub model: Mat4,
-    pub view: Mat4,
-    pub proj: Mat4,
-}
-
-pub struct RenderMesh {
-    pub vertex_buffer: Subbuffer<[MyVertex]>,
+pub struct GPUMesh {
+    pub vertex_buffer: Subbuffer<[ElmVertex]>,
     pub index_buffer: Subbuffer<[u32]>,
     pub _vertex_count: u32,
     pub index_count: u32,
 }
 
-#[allow(dead_code)]
-pub struct Texture {
-    pub image: Arc<Image>,
+pub struct GPUTexture {
     pub image_view: Arc<ImageView>,
     pub sampler: Arc<Sampler>,
 }
@@ -70,10 +37,10 @@ pub struct Texture {
 pub struct VulkanResources {
     device: Arc<Device>,
     memory_allocator: Arc<StandardMemoryAllocator>,
-    meshes: Vec<RenderMesh>,
-    depth_resource: Option<Arc<ImageView>>,
-    textures: HashMap<String, Texture>,
-    uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
+    pub meshes: Vec<GPUMesh>,
+    pub textures: Vec<GPUTexture>,
+    pub depth_resource: Option<Arc<ImageView>>,
+    pub uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
     graphics_queue: Arc<Queue>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
@@ -89,66 +56,70 @@ impl VulkanResources {
             device,
             memory_allocator,
             meshes: Vec::new(),
+            textures: Vec::new(),
             depth_resource: None,
-            textures: HashMap::new(),
             uniform_buffers: Vec::new(),
             graphics_queue,
             command_buffer_allocator,
         }
     }
 
-    pub fn create_mesh(&mut self, vertices: &mut [MyVertex], indices: &[u32]) -> Result<usize> {
+    pub fn upload_mesh(&mut self, vertices: &[ElmVertex], indices: &[u32]) -> Result<()> {
         let vertex_buffer = self.create_vertex_buffer(vertices)?;
         let index_buffer = self.create_index_buffer(indices)?;
 
-        let mesh = RenderMesh {
+        let mesh = GPUMesh {
             _vertex_count: vertices.len() as u32,
             index_count: indices.len() as u32,
             vertex_buffer,
             index_buffer,
         };
         self.meshes.push(mesh);
-        Ok(self.meshes.len() - 1)
-    }
-
-    pub fn get_mesh(&self, mesh_id: usize) -> Option<&RenderMesh> {
-        self.meshes.get(mesh_id)
-    }
-
-    pub fn create_texture(&mut self, path: &Path) -> Result<()> {
-        let path_str = path.to_string_lossy().to_string();
-        if self.textures.contains_key(&path_str) {
-            return Ok(());
-        }
-
-        let image = self.create_texture_image(path)?;
-        let image_view = self.create_texture_image_view(image.clone())?;
-        let sampler = self.create_texture_sampler()?;
-
-        let texture = Texture {
-            image,
-            image_view,
-            sampler,
-        };
-        self.textures.insert(path_str, texture);
         Ok(())
     }
 
-    pub fn get_texture(&self, path: &Path) -> Option<&Texture> {
-        let path_str = path.to_string_lossy().to_string();
-        self.textures.get(&path_str)
+    pub fn get_mesh(&self, mesh_id: usize) -> Option<&GPUMesh> {
+        self.meshes.get(mesh_id)
     }
 
-    fn create_texture_image(&self, path: &Path) -> Result<Arc<Image>> {
-        let img = ImageReader::open(path)?.decode()?.to_rgba8();
-        let (width, height) = img.dimensions();
-        let staging_buffer = self.create_staging_buffer(&img.into_raw())?;
+    pub fn upload_texture(
+        &mut self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+        mag_filter: Filter,
+        min_filter: Filter,
+        address_mode: [SamplerAddressMode; 3],
+    ) -> Result<()> {
+        let image = self.create_texture_image(image_data, width, height)?;
+        let image_view = self.create_texture_image_view(image)?;
+        let sampler = self.create_texture_sampler(mag_filter, min_filter, address_mode)?;
+
+        let texture = GPUTexture {
+            image_view,
+            sampler,
+        };
+        self.textures.push(texture);
+        Ok(())
+    }
+
+    pub fn get_texture(&self, texture_id: usize) -> Option<&GPUTexture> {
+        self.textures.get(texture_id)
+    }
+
+    fn create_texture_image(
+        &self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<Arc<Image>> {
+        let staging_buffer = self.create_staging_buffer(image_data)?;
 
         let texture_image = Image::new(
             self.memory_allocator.clone(),
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
-                format: vulkano::format::Format::R8G8B8A8_SRGB,
+                format: Format::R8G8B8A8_SRGB,
                 extent: [width, height, 1],
                 mip_levels: 1,
                 array_layers: 1,
@@ -171,13 +142,18 @@ impl VulkanResources {
         Ok(image_view)
     }
 
-    fn create_texture_sampler(&self) -> Result<Arc<Sampler>> {
+    fn create_texture_sampler(
+        &self,
+        mag_filter: Filter,
+        min_filter: Filter,
+        address_mode: [SamplerAddressMode; 3],
+    ) -> Result<Arc<Sampler>> {
         let sampler = Sampler::new(
             self.device.clone(),
             SamplerCreateInfo {
-                mag_filter: Filter::Linear,
-                min_filter: Filter::Linear,
-                address_mode: [SamplerAddressMode::Repeat; 3],
+                mag_filter,
+                min_filter,
+                address_mode,
                 anisotropy: Some(
                     self.device
                         .physical_device()
@@ -274,10 +250,10 @@ impl VulkanResources {
         Ok(())
     }
 
-    fn create_vertex_buffer(&self, vertices: &[MyVertex]) -> Result<Subbuffer<[MyVertex]>> {
+    fn create_vertex_buffer(&self, vertices: &[ElmVertex]) -> Result<Subbuffer<[ElmVertex]>> {
         let staging_buffer = self.create_staging_buffer(vertices)?;
 
-        let vertex_buffer = Buffer::new_slice::<MyVertex>(
+        let vertex_buffer = Buffer::new_slice::<ElmVertex>(
             self.memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::VERTEX_BUFFER | BufferUsage::TRANSFER_DST,

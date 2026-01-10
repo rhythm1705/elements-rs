@@ -4,6 +4,8 @@ use crate::{
 };
 
 pub mod application;
+pub mod asset_loader;
+pub mod core;
 pub mod input;
 pub mod logger;
 pub mod platform;

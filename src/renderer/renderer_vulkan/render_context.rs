@@ -105,7 +105,8 @@ impl RenderContext {
                 color_attachments,
                 depth_attachment,
                 ..Default::default()
-            })?
+            })
+            .with_context(|| "Begin rendering")?
             .bind_pipeline_graphics(self.pipeline.pipeline())?
             .set_viewport(0, [self.viewport.clone()].into_iter().collect())?
             .bind_descriptor_sets(
@@ -114,7 +115,7 @@ impl RenderContext {
                 0,
                 self.frames[self.current_frame].descriptor_sets.clone(),
             )
-            .with_context(|| "Failed to bind descriptor sets")?;
+            .with_context(|| "Bind descriptor sets")?;
 
         Ok(builder)
     }
@@ -129,22 +130,21 @@ pub struct ActiveFrame<'a> {
 }
 
 impl<'a> ActiveFrame<'a> {
-    pub fn draw_mesh(&mut self, mesh_index: usize) -> Result<()> {
-        let mesh = self
-            .resources
-            .get_mesh(mesh_index)
-            .with_context(|| format!("Mesh {mesh_index} not found"))?;
-        if let Some(ref mut builder) = self.builder {
-            builder
-                .bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
-                .bind_index_buffer(mesh.index_buffer.clone())?;
-            // We add a draw command.
-            unsafe {
-                builder.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
-            };
-        } else {
-            return Err(anyhow::anyhow!("Command buffer builder not initialized"));
+    pub fn draw(&mut self) -> Result<()> {
+        for mesh in &self.resources.meshes {
+            if let Some(ref mut builder) = self.builder {
+                builder
+                    .bind_vertex_buffers(0, mesh.vertex_buffer.clone())?
+                    .bind_index_buffer(mesh.index_buffer.clone())?;
+                // We add a draw command.
+                unsafe {
+                    builder.draw_indexed(mesh.index_count, 1, 0, 0, 0)?;
+                };
+            } else {
+                return Err(anyhow::anyhow!("Command buffer builder not initialized"));
+            }
         }
+
         Ok(())
     }
 
