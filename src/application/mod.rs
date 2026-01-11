@@ -76,7 +76,6 @@ impl Application {
             // info!("Model: {:?}", model);
             for mesh in model.meshes.iter() {
                 for primitive in mesh.primitives.iter() {
-
                     if let Err(e) = renderer.upload_mesh(&primitive.vertices, &primitive.indices) {
                         error!("Failed to upload mesh: {:?}", e);
                     }

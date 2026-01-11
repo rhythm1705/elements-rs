@@ -50,12 +50,12 @@ impl RenderContext {
 
         let mut ubo = UniformBufferObject {
             model: Mat4::from_rotation_z(elapsed.as_secs_f32() * 90.0f32.to_radians()),
-            view: Mat4::look_at_rh(Vec3::new(2.0, 2.0, 2.0), Vec3::ZERO, Vec3::Z),
+            view: Mat4::look_at_rh(Vec3::new(5.0, 5.0, 5.0), Vec3::ZERO, Vec3::Z),
             proj: Mat4::perspective_rh(
                 45.0f32.to_radians(),
                 self.viewport.extent[0] / self.viewport.extent[1],
-                0.1,
-                10.0,
+                0.5,
+                20.0,
             ),
         };
         ubo.proj.y_axis.y *= -1.0; // Invert Y coordinate for Vulkan

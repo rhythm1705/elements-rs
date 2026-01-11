@@ -1,15 +1,21 @@
 pub(crate) use crate::core::ubo::UniformBufferObject;
 pub(crate) use crate::core::vertex::ElmVertex;
 use anyhow::{Result, anyhow};
+use std::cmp::max;
 use std::sync::Arc;
-use vulkano::command_buffer::{CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
+use vulkano::command_buffer::{
+    BlitImageInfo, CopyBufferToImageInfo, ImageBlit, PrimaryAutoCommandBuffer,
+};
 use vulkano::format::{Format, FormatFeatures};
 use vulkano::image::sampler::BorderColor::IntOpaqueBlack;
 use vulkano::image::sampler::SamplerMipmapMode::Linear;
-use vulkano::image::sampler::{Filter, SamplerAddressMode};
+use vulkano::image::sampler::{Filter, LOD_CLAMP_NONE, SamplerAddressMode};
 use vulkano::image::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage};
+use vulkano::image::{
+    Image, ImageAspect, ImageCreateInfo, ImageLayout, ImageSubresourceLayers, ImageTiling,
+    ImageType, ImageUsage,
+};
 use vulkano::{
     DeviceSize,
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -36,13 +42,13 @@ pub struct GPUTexture {
 
 pub struct VulkanResources {
     device: Arc<Device>,
+    graphics_queue: Arc<Queue>,
     memory_allocator: Arc<StandardMemoryAllocator>,
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     pub meshes: Vec<GPUMesh>,
     pub textures: Vec<GPUTexture>,
     pub depth_resource: Option<Arc<ImageView>>,
     pub uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
-    graphics_queue: Arc<Queue>,
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
 }
 
 impl VulkanResources {
@@ -54,13 +60,13 @@ impl VulkanResources {
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
         Self {
             device,
+            graphics_queue,
             memory_allocator,
+            command_buffer_allocator,
             meshes: Vec::new(),
             textures: Vec::new(),
             depth_resource: None,
             uniform_buffers: Vec::new(),
-            graphics_queue,
-            command_buffer_allocator,
         }
     }
 
@@ -91,9 +97,10 @@ impl VulkanResources {
         min_filter: Filter,
         address_mode: [SamplerAddressMode; 3],
     ) -> Result<()> {
-        let image = self.create_texture_image(image_data, width, height)?;
-        let image_view = self.create_texture_image_view(image)?;
-        let sampler = self.create_texture_sampler(mag_filter, min_filter, address_mode)?;
+        let mip_levels = max(width, height).ilog2() + 1;
+        let image = self.create_texture_image(image_data, width, height, mip_levels)?;
+        let image_view = ImageView::new_default(image.clone())?;
+        let sampler = self.create_texture_sampler(image, mag_filter, min_filter, address_mode)?;
 
         let texture = GPUTexture {
             image_view,
@@ -112,6 +119,7 @@ impl VulkanResources {
         image_data: &[u8],
         width: u32,
         height: u32,
+        mip_levels: u32,
     ) -> Result<Arc<Image>> {
         let staging_buffer = self.create_staging_buffer(image_data)?;
 
@@ -121,9 +129,9 @@ impl VulkanResources {
                 image_type: ImageType::Dim2d,
                 format: Format::R8G8B8A8_SRGB,
                 extent: [width, height, 1],
-                mip_levels: 1,
+                mip_levels,
                 array_layers: 1,
-                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED | ImageUsage::TRANSFER_SRC,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -134,16 +142,76 @@ impl VulkanResources {
 
         self.copy_buffer_to_image(staging_buffer, texture_image.clone())?;
 
+        self.generate_mipmaps(texture_image.clone())?;
+
         Ok(texture_image)
     }
 
-    fn create_texture_image_view(&self, image: Arc<Image>) -> Result<Arc<ImageView>> {
-        let image_view = ImageView::new_default(image)?;
-        Ok(image_view)
+    fn generate_mipmaps(&self, image: Arc<Image>) -> Result<()> {
+        let format_properties = self
+            .device
+            .physical_device()
+            .format_properties(image.format())?;
+
+        if !format_properties
+            .optimal_tiling_features
+            .intersects(FormatFeatures::SAMPLED_IMAGE_FILTER_LINEAR)
+        {
+            return Err(anyhow!(
+                "Texture image format does not support linear blitting!"
+            ));
+        }
+
+        let mut command_buffer = self.begin_single_time_commands()?;
+
+        let mut mip_width = image.extent()[0];
+        let mut mip_height = image.extent()[1];
+
+        // NOTE: This function assumes that mip level 0 has already been populated
+        // (typically via a preceding copy_buffer_to_image call) and is in a layout
+        // that allows it to be used as a transfer source for linear blits.
+        debug_assert!(image.mip_levels() > 0, "Image must have at least one mip level");
+        for level in 1..image.mip_levels() {
+            let next_mip_width = if mip_width > 1 { mip_width / 2 } else { 1 };
+            let next_mip_height = if mip_height > 1 { mip_height / 2 } else { 1 };
+
+            command_buffer.blit_image(BlitImageInfo {
+                src_image: image.clone(),
+                src_image_layout: ImageLayout::TransferSrcOptimal,
+                dst_image: image.clone(),
+                dst_image_layout: ImageLayout::TransferDstOptimal,
+                regions: vec![ImageBlit {
+                    src_subresource: ImageSubresourceLayers {
+                        aspects: ImageAspect::Color.into(),
+                        mip_level: level - 1,
+                        array_layers: 0..1,
+                    },
+                    src_offsets: [[0, 0, 0], [mip_width, mip_height, 1]],
+                    dst_subresource: ImageSubresourceLayers {
+                        aspects: ImageAspect::Color.into(),
+                        mip_level: level,
+                        array_layers: 0..1,
+                    },
+                    dst_offsets: [[0, 0, 0], [next_mip_width, next_mip_height, 1]],
+                    ..ImageBlit::default()
+                }]
+                .into(),
+                filter: Filter::Linear,
+                ..BlitImageInfo::images(image.clone(), image.clone())
+            })?;
+
+            mip_width = next_mip_width;
+            mip_height = next_mip_height;
+        }
+
+        self.end_single_time_commands(command_buffer)?;
+
+        Ok(())
     }
 
     fn create_texture_sampler(
         &self,
+        _image: Arc<Image>,
         mag_filter: Filter,
         min_filter: Filter,
         address_mode: [SamplerAddressMode; 3],
@@ -162,6 +230,7 @@ impl VulkanResources {
                 ),
                 border_color: IntOpaqueBlack,
                 mipmap_mode: Linear,
+                lod: 0.0..=LOD_CLAMP_NONE,
                 ..Default::default()
             },
         )?;
