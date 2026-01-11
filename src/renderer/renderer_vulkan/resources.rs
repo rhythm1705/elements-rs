@@ -14,7 +14,7 @@ use vulkano::image::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
 use vulkano::image::{
     Image, ImageAspect, ImageCreateInfo, ImageLayout, ImageSubresourceLayers, ImageTiling,
-    ImageType, ImageUsage,
+    ImageType, ImageUsage, SampleCount,
 };
 use vulkano::{
     DeviceSize,
@@ -45,9 +45,11 @@ pub struct VulkanResources {
     graphics_queue: Arc<Queue>,
     memory_allocator: Arc<StandardMemoryAllocator>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    pub msaa_samples: SampleCount,
     pub meshes: Vec<GPUMesh>,
     pub textures: Vec<GPUTexture>,
     pub depth_resource: Option<Arc<ImageView>>,
+    pub color_resource: Option<Arc<ImageView>>,
     pub uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
 }
 
@@ -58,14 +60,21 @@ impl VulkanResources {
         command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     ) -> Self {
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+        let properties = device.physical_device().properties();
+        let msaa_samples = properties
+            .framebuffer_color_sample_counts
+            .union(properties.framebuffer_depth_sample_counts)
+            .max_count();
         Self {
             device,
             graphics_queue,
             memory_allocator,
             command_buffer_allocator,
+            msaa_samples,
             meshes: Vec::new(),
             textures: Vec::new(),
             depth_resource: None,
+            color_resource: None,
             uniform_buffers: Vec::new(),
         }
     }
@@ -170,7 +179,10 @@ impl VulkanResources {
         // NOTE: This function assumes that mip level 0 has already been populated
         // (typically via a preceding copy_buffer_to_image call) and is in a layout
         // that allows it to be used as a transfer source for linear blits.
-        debug_assert!(image.mip_levels() > 0, "Image must have at least one mip level");
+        debug_assert!(
+            image.mip_levels() > 0,
+            "Image must have at least one mip level"
+        );
         for level in 1..image.mip_levels() {
             let next_mip_width = if mip_width > 1 { mip_width / 2 } else { 1 };
             let next_mip_height = if mip_height > 1 { mip_height / 2 } else { 1 };
@@ -237,6 +249,41 @@ impl VulkanResources {
         Ok(sampler)
     }
 
+    pub fn msaa_samples(&self) -> SampleCount {
+        self.msaa_samples
+    }
+
+    pub fn create_color_resources(&mut self, extent: [u32; 2], format: Format) -> Result<()> {
+        let color_image = Image::new(
+            self.memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format,
+                extent: [extent[0], extent[1], 1],
+                mip_levels: 1,
+                array_layers: 1,
+                usage: ImageUsage::TRANSIENT_ATTACHMENT | ImageUsage::COLOR_ATTACHMENT,
+                samples: self.msaa_samples,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )?;
+
+        let color_image_view = ImageView::new_default(color_image.clone())?;
+        self.color_resource = Some(color_image_view);
+        Ok(())
+    }
+
+    pub fn get_color_resources(&self) -> Result<Arc<ImageView>> {
+        self.color_resource
+            .as_ref()
+            .cloned()
+            .ok_or(anyhow!("Color resources not created"))
+    }
+
     pub fn create_depth_resources(&mut self, extent: [u32; 2]) -> Result<()> {
         let depth_format = self.find_depth_format()?;
 
@@ -249,6 +296,7 @@ impl VulkanResources {
                 mip_levels: 1,
                 array_layers: 1,
                 usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT,
+                samples: self.msaa_samples,
                 ..Default::default()
             },
             AllocationCreateInfo {

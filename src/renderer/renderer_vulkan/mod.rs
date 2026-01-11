@@ -248,11 +248,14 @@ impl Renderer for VulkanRenderer {
         let swapchain =
             VulkanSwapchain::new(self.device.clone(), surface.clone(), window_size.into())?;
 
+        self.resources
+            .create_color_resources(swapchain.extent, swapchain.format)?;
         self.resources.create_depth_resources(swapchain.extent)?;
 
         let pipeline = VulkanPipeline::new(
             self.device.clone(),
             swapchain.format,
+            self.resources.msaa_samples(),
             self.resources.find_depth_format()?,
         )?;
 
@@ -355,6 +358,8 @@ impl Renderer for VulkanRenderer {
             );
             rcx.swapchain.recreate(window_size.into())?;
             self.resources
+                .create_color_resources(rcx.swapchain.extent, rcx.swapchain.format)?;
+            self.resources
                 .create_depth_resources(rcx.swapchain.extent)?;
             rcx.viewport.extent = window_size.into();
             rcx.recreate_swapchain = false;
@@ -391,6 +396,7 @@ impl Renderer for VulkanRenderer {
         match rcx.build_command_buffer(
             self.command_buffer_allocator.clone(),
             self.graphics_queue.clone(),
+            self.resources.get_color_resources()?,
             self.resources.get_depth_resources()?,
             image_index,
         ) {
@@ -408,7 +414,7 @@ impl Renderer for VulkanRenderer {
                     .with_context(|| "Failed to execute command buffer")?;
                 Ok(())
             }
-            Err(err) => Err(anyhow!("Failed to build command buffer: {}", err)),
+            Err(err) => Err(anyhow!("Failed to build command buffer: {:?}", err)),
         }
     }
 
