@@ -167,6 +167,10 @@ impl VulkanResources {
         let mut mip_width = image.extent()[0];
         let mut mip_height = image.extent()[1];
 
+        // NOTE: This function assumes that mip level 0 has already been populated
+        // (typically via a preceding copy_buffer_to_image call) and is in a layout
+        // that allows it to be used as a transfer source for linear blits.
+        debug_assert!(image.mip_levels() > 0, "Image must have at least one mip level");
         for level in 1..image.mip_levels() {
             let next_mip_width = if mip_width > 1 { mip_width / 2 } else { 1 };
             let next_mip_height = if mip_height > 1 { mip_height / 2 } else { 1 };
