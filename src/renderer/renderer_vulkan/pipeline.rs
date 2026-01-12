@@ -67,6 +67,7 @@ impl VulkanPipeline {
 
             let multisample_state = MultisampleState {
                 rasterization_samples: msaa_samples,
+                sample_shading: Some(0.2),
                 ..MultisampleState::default()
             };
 

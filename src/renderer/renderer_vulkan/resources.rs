@@ -45,12 +45,12 @@ pub struct VulkanResources {
     graphics_queue: Arc<Queue>,
     memory_allocator: Arc<StandardMemoryAllocator>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    pub msaa_samples: SampleCount,
     pub meshes: Vec<GPUMesh>,
     pub textures: Vec<GPUTexture>,
-    pub depth_resource: Option<Arc<ImageView>>,
-    pub color_resource: Option<Arc<ImageView>>,
-    pub uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
+    msaa_samples: SampleCount,
+    color_resource: Option<Arc<ImageView>>,
+    depth_resource: Option<Arc<ImageView>>,
+    uniform_buffers: Vec<Subbuffer<UniformBufferObject>>,
 }
 
 impl VulkanResources {
@@ -63,18 +63,18 @@ impl VulkanResources {
         let properties = device.physical_device().properties();
         let msaa_samples = properties
             .framebuffer_color_sample_counts
-            .union(properties.framebuffer_depth_sample_counts)
+            .intersection(properties.framebuffer_depth_sample_counts)
             .max_count();
         Self {
             device,
             graphics_queue,
             memory_allocator,
             command_buffer_allocator,
-            msaa_samples,
             meshes: Vec::new(),
             textures: Vec::new(),
-            depth_resource: None,
+            msaa_samples,
             color_resource: None,
+            depth_resource: None,
             uniform_buffers: Vec::new(),
         }
     }

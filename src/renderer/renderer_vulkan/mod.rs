@@ -200,6 +200,7 @@ impl Renderer for VulkanRenderer {
                 enabled_features: DeviceFeatures {
                     dynamic_rendering: true,
                     sampler_anisotropy: true,
+                    sample_rate_shading: true,
                     ..Default::default()
                 },
                 ..Default::default()

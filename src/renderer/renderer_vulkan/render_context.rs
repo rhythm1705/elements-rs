@@ -87,7 +87,7 @@ impl RenderContext {
 
         let color_attachments = vec![Some(RenderingAttachmentInfo {
             load_op: AttachmentLoadOp::Clear,
-            store_op: AttachmentStoreOp::Store,
+            store_op: AttachmentStoreOp::DontCare,
             clear_value: Some(clear_color),
             image_layout: ImageLayout::ColorAttachmentOptimal,
             resolve_info: Some(RenderingAttachmentResolveInfo {
