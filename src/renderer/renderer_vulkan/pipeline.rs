@@ -5,6 +5,7 @@ use crate::renderer::renderer_vulkan::{
     shaders::{fs, vs},
 };
 use anyhow::{Result, anyhow};
+use vulkano::image::SampleCount;
 use vulkano::pipeline::graphics::depth_stencil::{CompareOp, DepthState, DepthStencilState};
 use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
 use vulkano::{
@@ -35,7 +36,12 @@ pub struct VulkanPipeline {
 }
 
 impl VulkanPipeline {
-    pub fn new(device: Arc<Device>, format: Format, depth_format: Format) -> Result<Self> {
+    pub fn new(
+        device: Arc<Device>,
+        format: Format,
+        msaa_samples: SampleCount,
+        depth_format: Format,
+    ) -> Result<Self> {
         let pipeline = {
             let vs = vs::load(device.clone())?
                 .entry_point("main")
@@ -57,6 +63,12 @@ impl VulkanPipeline {
                 cull_mode: CullMode::Back,
                 front_face: FrontFace::CounterClockwise,
                 ..RasterizationState::default()
+            };
+
+            let multisample_state = MultisampleState {
+                rasterization_samples: msaa_samples,
+                sample_shading: Some(0.2),
+                ..MultisampleState::default()
             };
 
             let mut ubo_layout_binding =
@@ -118,7 +130,7 @@ impl VulkanPipeline {
                     rasterization_state: Some(rasterization_state),
                     // How multiple fragment shader samples are converted to a single pixel value.
                     // The default value does not perform any multisampling.
-                    multisample_state: Some(MultisampleState::default()),
+                    multisample_state: Some(multisample_state),
                     // How pixel values are combined with the values already present in the
                     // framebuffer. The default value overwrites the old value with the new one,
                     // without any blending.

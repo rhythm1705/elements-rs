@@ -8,13 +8,16 @@ use glam::{Mat4, Vec3};
 use std::{sync::Arc, time::Instant};
 use tracing::error;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
-use vulkano::command_buffer::{CommandBufferUsage, RenderingAttachmentInfo, RenderingInfo};
+use vulkano::command_buffer::{
+    CommandBufferUsage, RenderingAttachmentInfo, RenderingAttachmentResolveInfo, RenderingInfo,
+};
 use vulkano::device::Queue;
 use vulkano::format::ClearValue;
+use vulkano::image::ImageLayout;
 use vulkano::image::ImageLayout::DepthAttachmentOptimal;
 use vulkano::image::view::ImageView;
 use vulkano::pipeline::PipelineBindPoint;
-use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
+use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp, ResolveMode};
 use vulkano::swapchain::SwapchainPresentInfo;
 use vulkano::{
     Validated, VulkanError,
@@ -68,6 +71,7 @@ impl RenderContext {
         &mut self,
         command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
         graphics_queue: Arc<Queue>,
+        color_image_view: Arc<ImageView>,
         depth_image_view: Arc<ImageView>,
         image_index: u32,
     ) -> Result<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>> {
@@ -83,11 +87,16 @@ impl RenderContext {
 
         let color_attachments = vec![Some(RenderingAttachmentInfo {
             load_op: AttachmentLoadOp::Clear,
-            store_op: AttachmentStoreOp::Store,
+            store_op: AttachmentStoreOp::DontCare,
             clear_value: Some(clear_color),
-            ..RenderingAttachmentInfo::image_view(
-                self.swapchain.image_views[image_index as usize].clone(),
-            )
+            image_layout: ImageLayout::ColorAttachmentOptimal,
+            resolve_info: Some(RenderingAttachmentResolveInfo {
+                mode: ResolveMode::Average,
+                ..RenderingAttachmentResolveInfo::image_view(
+                    self.swapchain.image_views[image_index as usize].clone(),
+                )
+            }),
+            ..RenderingAttachmentInfo::image_view(color_image_view.clone())
         })];
 
         let depth_attachment = Some(RenderingAttachmentInfo {

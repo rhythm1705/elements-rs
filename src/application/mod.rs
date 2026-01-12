@@ -100,7 +100,9 @@ impl Application {
             error!("Failed to load super_car.scene: {:?}", handle);
         }
 
-        renderer.run().unwrap();
+        if let Err(e) = renderer.run() {
+            error!("Renderer encountered an error: {:?}", e);
+        }
     }
 
     pub fn on_update(&mut self) {
@@ -110,7 +112,10 @@ impl Application {
             .expect("Renderer must be initialized before updating the application");
         let start_time = std::time::Instant::now();
 
-        renderer.on_update().unwrap();
+        if let Err(e) = renderer.on_update() {
+            error!("Renderer update error: {:?}", e);
+            panic!("Renderer update failed");
+        }
 
         {
             let window = self.resources.get_mut::<Window>();
