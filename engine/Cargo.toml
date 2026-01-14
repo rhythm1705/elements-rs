@@ -1,0 +1,18 @@
+[package]
+name = "elements-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = "1.0.99"
+assets_manager = { version = "0.13.6", features = ["gltf"] }
+glam = { version = "0.30.9", features = ["bytemuck"] }
+gltf = "1.4.1"
+# Compile out debug/info logs in release builds while keeping them in debug builds.
+# (debug_assertions is enabled for dev/profile dev builds.)
+tracing = { version = "0.1.41", features = ["max_level_debug", "release_max_level_warn"] }
+tracing-subscriber = "0.3.19"
+vulkano = "0.35.2"
+vulkano-shaders = "0.35.0"
+winit = "0.30.12"

@@ -9,19 +9,19 @@ use tracing::{debug, error};
 use winit::event::WindowEvent;
 use winit::window::Window as WinitWindow;
 
-pub struct Application {
+pub struct Engine {
     resources: ResourceManager,
     _logger: Logger,
     renderer: Option<Box<dyn Renderer>>,
 }
 
-impl Application {
-    pub fn new() -> Application {
+impl Engine {
+    pub fn new() -> Engine {
         let _logger = Logger::new();
         let mut resources = ResourceManager::new();
         resources.add(Input::new());
         resources.add(AssetLoader::new());
-        Application {
+        Engine {
             resources,
             _logger,
             renderer: None,
@@ -68,7 +68,7 @@ impl Application {
         let renderer = self
             .renderer
             .as_mut()
-            .expect("Renderer must be initialized before running the application");
+            .expect("Renderer must be initialized before running the engine");
         let asset_loader = self.resources.get_mut::<AssetLoader>();
         let handle = asset_loader.load::<GltfModel>("super_car.scene");
         if let Ok(handle) = handle {
@@ -109,7 +109,7 @@ impl Application {
         let renderer = self
             .renderer
             .as_mut()
-            .expect("Renderer must be initialized before updating the application");
+            .expect("Renderer must be initialized before updating the engine");
         let start_time = std::time::Instant::now();
 
         if let Err(e) = renderer.on_update() {
@@ -138,7 +138,7 @@ impl Application {
     }
 }
 
-impl Default for Application {
+impl Default for Engine {
     fn default() -> Self {
         Self::new()
     }

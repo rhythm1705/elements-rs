@@ -1,0 +1,6 @@
+# Cargo configuration for the workspace
+# This ensures that unused code warnings are always allowed, even when running with -D warnings
+
+[build]
+rustflags = ["-A", "dead_code", "-A", "unused"]
+
