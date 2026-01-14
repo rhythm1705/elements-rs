@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::application::Application;
+use crate::engine::Engine;
 use crate::platform::Platform;
 use tracing::info;
 use winit::application::ApplicationHandler;
@@ -9,7 +9,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window as WinitWindow, WindowId};
 
 pub struct WinitPlatform {
-    app: Application,
+    app: Engine,
 }
 
 impl ApplicationHandler for WinitPlatform {
@@ -41,15 +41,15 @@ impl ApplicationHandler for WinitPlatform {
 }
 
 impl Platform for WinitPlatform {
-    fn new(app: Application) -> Self {
+    fn new(app: Engine) -> Self {
         Self { app }
     }
 
-    fn run(mut self) {
+    fn run(&mut self) {
         info!("Starting event loop...");
 
         let event_loop = EventLoop::new().unwrap();
         event_loop.set_control_flow(ControlFlow::Poll);
-        let _ = event_loop.run_app(&mut self);
+        let _ = event_loop.run_app(self);
     }
 }

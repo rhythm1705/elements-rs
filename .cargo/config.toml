@@ -1,0 +1,3 @@
+# Cargo configuration for the workspace
+# Workspace-level lint settings should be controlled in the code or via CI, not by globally
+# suppressing unused-code warnings here.
