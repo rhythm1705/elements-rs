@@ -12,5 +12,5 @@ pub trait Platform {
 
     /// Runs the engine, taking over the main thread.
     /// This function will never return.
-    fn run(&mut self);
+    fn run(self);
 }

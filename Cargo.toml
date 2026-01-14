@@ -14,13 +14,12 @@ authors = ["Rhythm Goel <rhythm1705@outlook.com>"]
 dead_code = "allow"
 unused_variables = "allow"
 unused_imports = "allow"
-unused = "allow"
+unused = "warn"
 
 [workspace.lints.clippy]
 # Deny the entire set of default Clippy lints.
 all = { level = "deny", priority = -1 }
-# Deny the entire set of pedantic lints, which catch non-idiomatic or potentially messy code.
-#pedantic = "deny"
+
 
 
 [profile.dev]
