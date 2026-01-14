@@ -45,11 +45,11 @@ impl Platform for WinitPlatform {
         Self { app }
     }
 
-    fn run(&mut self) {
+    fn run(mut self: Box<Self>) {
         info!("Starting event loop...");
 
         let event_loop = EventLoop::new().unwrap();
         event_loop.set_control_flow(ControlFlow::Poll);
-        let _ = event_loop.run_app(self);
+        let _ = event_loop.run_app(&mut self);
     }
 }

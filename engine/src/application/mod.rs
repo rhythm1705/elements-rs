@@ -21,7 +21,7 @@ impl Application {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(self) {
         self.platform.run();
     }
 }
