@@ -1,9 +1,11 @@
 use crate::engine::Engine;
 use crate::platform::Platform;
 use crate::platform::platform_winit::WinitPlatform;
+use crate::resource_manager::ResourceManager;
+use hecs::World;
 
 pub struct Application {
-    platform: Box<dyn Platform>,
+    engine: Engine,
 }
 
 impl Default for Application {
@@ -14,14 +16,27 @@ impl Default for Application {
 
 impl Application {
     pub fn new() -> Application {
-        let engine = Engine::new();
-        let platform = WinitPlatform::new(engine);
         Application {
-            platform: Box::new(platform),
+            engine: Engine::new(),
         }
     }
 
+    pub fn add_startup_system<F>(&mut self, system: F)
+    where
+        F: FnMut(&mut World, &mut ResourceManager) + 'static,
+    {
+        self.engine.add_startup_system(system);
+    }
+
+    pub fn add_update_system<F>(&mut self, system: F)
+    where
+        F: FnMut(&mut World, &mut ResourceManager) + 'static,
+    {
+        self.engine.add_update_system(system);
+    }
+
     pub fn run(self) {
-        self.platform.run();
+        let platform: Box<dyn Platform> = Box::new(WinitPlatform::new(self.engine));
+        platform.run();
     }
 }

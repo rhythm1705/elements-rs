@@ -5,7 +5,6 @@ use assets_manager::{Asset, AssetCache, BoxedError, SharedString};
 use glam::{Vec2, Vec3};
 use gltf::image::Format;
 use gltf::texture::{MagFilter, MinFilter, WrappingMode};
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Primitive {
@@ -113,41 +112,28 @@ impl Asset for GltfModel {
                 let tex_coords: Option<Vec<[f32; 2]>> =
                     reader.read_tex_coords(0).map(|tc| tc.into_f32().collect());
 
-                let mut unique_vertices = HashMap::<ElmVertex, u32>::new();
-                let mut vertices: Vec<ElmVertex> = Vec::new();
-                let mut remapped_indices: Vec<u32> = Vec::with_capacity(indices.len());
+                let mut vertices: Vec<ElmVertex> = Vec::with_capacity(positions.len());
 
-                for &i in &indices {
-                    let position = ElmVec3::from(Vec3::from(positions[i as usize]));
+                for i in 0..positions.len() {
+                    let position = ElmVec3::from(Vec3::from(positions[i]));
+                    let color = ElmVec3::from(Vec3::new(1.0, 1.0, 1.0)); // Default white color
                     let tex_coord = if let Some(ref tcs) = tex_coords {
-                        ElmVec2::from(Vec2::from(tcs[i as usize]))
+                        ElmVec2::from(Vec2::from(tcs[i]))
                     } else {
                         ElmVec2::from(Vec2::new(0.0, 0.0))
                     };
-                    let color = ElmVec3::from(Vec3::new(1.0, 1.0, 1.0)); // Default white color
-
-                    let vertex = ElmVertex {
+                    vertices.push(ElmVertex {
                         position,
                         color,
                         tex_coord,
-                    };
-
-                    let index = *unique_vertices.entry(vertex).or_insert_with(|| {
-                        let new_index = vertices.len() as u32;
-                        vertices.push(vertex);
-                        new_index
                     });
-                    remapped_indices.push(index);
                 }
 
                 if vertices.is_empty() {
                     continue; // Skip empty meshes
                 }
 
-                primitives.push(Primitive {
-                    vertices,
-                    indices: remapped_indices,
-                });
+                primitives.push(Primitive { vertices, indices });
             }
             meshes.push(Mesh { primitives });
         }

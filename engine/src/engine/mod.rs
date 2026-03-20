@@ -4,15 +4,21 @@ use crate::{
     asset_loader::AssetLoader, input::Input, logger::Logger, renderer::Renderer,
     resource_manager::ResourceManager, window::Window,
 };
+use hecs::World;
 use std::sync::Arc;
 use tracing::{debug, error};
 use winit::event::WindowEvent;
 use winit::window::Window as WinitWindow;
 
+type SystemFn = Box<dyn FnMut(&mut World, &mut ResourceManager)>;
+
 pub struct Engine {
-    resources: ResourceManager,
+    pub resources: ResourceManager,
+    pub world: World,
     _logger: Logger,
     renderer: Option<Box<dyn Renderer>>,
+    startup_systems: Vec<SystemFn>,
+    update_systems: Vec<SystemFn>,
 }
 
 impl Engine {
@@ -23,9 +29,26 @@ impl Engine {
         resources.add(AssetLoader::new());
         Engine {
             resources,
+            world: World::new(),
             _logger,
             renderer: None,
+            startup_systems: Vec::new(),
+            update_systems: Vec::new(),
         }
+    }
+
+    pub fn add_startup_system<F>(&mut self, system: F)
+    where
+        F: FnMut(&mut World, &mut ResourceManager) + 'static,
+    {
+        self.startup_systems.push(Box::new(system));
+    }
+
+    pub fn add_update_system<F>(&mut self, system: F)
+    where
+        F: FnMut(&mut World, &mut ResourceManager) + 'static,
+    {
+        self.update_systems.push(Box::new(system));
     }
 
     pub fn set_window(&mut self, window: Arc<WinitWindow>) {
@@ -65,6 +88,11 @@ impl Engine {
     }
 
     pub fn run(&mut self) {
+        // Execute startup systems
+        for system in self.startup_systems.iter_mut() {
+            system(&mut self.world, &mut self.resources);
+        }
+
         let renderer = self
             .renderer
             .as_mut()
@@ -106,6 +134,11 @@ impl Engine {
     }
 
     pub fn on_update(&mut self) {
+        // Execute update systems
+        for system in self.update_systems.iter_mut() {
+            system(&mut self.world, &mut self.resources);
+        }
+
         let renderer = self
             .renderer
             .as_mut()

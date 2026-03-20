@@ -5,7 +5,7 @@ use vulkano::buffer::BufferContents;
 use vulkano::pipeline::graphics::vertex_input::Vertex;
 
 #[repr(C)]
-#[derive(BufferContents, PartialEq, Debug, Clone, Copy)]
+#[derive(BufferContents, Debug, Clone, Copy)]
 pub struct ElmVec3(Vec3);
 
 impl Deref for ElmVec3 {
@@ -21,18 +21,8 @@ impl From<glam::Vec3> for ElmVec3 {
     }
 }
 
-impl Eq for ElmVec3 {}
-
-impl Hash for ElmVec3 {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for f in &self.to_array() {
-            f.to_bits().hash(state);
-        }
-    }
-}
-
 #[repr(C)]
-#[derive(BufferContents, PartialEq, Debug, Clone, Copy)]
+#[derive(BufferContents, Debug, Clone, Copy)]
 pub struct ElmVec2(Vec2);
 
 impl Deref for ElmVec2 {
@@ -48,17 +38,8 @@ impl From<Vec2> for ElmVec2 {
     }
 }
 
-impl Eq for ElmVec2 {}
-impl Hash for ElmVec2 {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for f in &self.to_array() {
-            f.to_bits().hash(state);
-        }
-    }
-}
-
 #[repr(C)]
-#[derive(BufferContents, Vertex, Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(BufferContents, Vertex, Debug, Clone, Copy)]
 pub struct ElmVertex {
     // Every field needs to explicitly state the desired shader input format
     // The `name` attribute can be used to specify shader input names to match.
