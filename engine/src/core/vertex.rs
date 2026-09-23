@@ -1,5 +1,4 @@
 use glam::{Vec2, Vec3};
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use vulkano::buffer::BufferContents;
 use vulkano::pipeline::graphics::vertex_input::Vertex;

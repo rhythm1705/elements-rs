@@ -4,7 +4,10 @@ use crate::renderer::renderer_vulkan::{
     swapchain::VulkanSwapchain,
 };
 use anyhow::{Context, Result};
-use glam::{Mat4, Vec3};
+use glam::{
+    Mat4, Vec3,
+    camera::rh::{proj::vulkan::perspective, view::look_at_mat4},
+};
 use std::{sync::Arc, time::Instant};
 use tracing::error;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
@@ -51,17 +54,16 @@ impl RenderContext {
         let current_time = Instant::now();
         let elapsed = current_time.duration_since(self.start_time);
 
-        let mut ubo = UniformBufferObject {
+        let ubo = UniformBufferObject {
             model: Mat4::from_rotation_z(elapsed.as_secs_f32() * 90.0f32.to_radians()),
-            view: Mat4::look_at_rh(Vec3::new(5.0, 5.0, 5.0), Vec3::ZERO, Vec3::Z),
-            proj: Mat4::perspective_rh(
+            view: look_at_mat4(Vec3::new(5.0, 5.0, 5.0), Vec3::ZERO, Vec3::Z),
+            proj: perspective(
                 45.0f32.to_radians(),
                 self.viewport.extent[0] / self.viewport.extent[1],
                 0.5,
                 20.0,
             ),
         };
-        ubo.proj.y_axis.y *= -1.0; // Invert Y coordinate for Vulkan
 
         *ubo_buffer.write()? = ubo;
         Ok(())

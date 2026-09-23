@@ -5,15 +5,25 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-anyhow = "1.0.99"
-assets_manager = { version = "0.13.6", features = ["gltf"] }
-glam = { version = "0.32.1", features = ["bytemuck"] }
-gltf = "1.4.1"
-hecs = "0.11.0"
+anyhow = "1.0.104"
+assets_manager = { version = "0.13.10", features = ["gltf"] }
+glam = { version = "0.33.8", features = ["bytemuck"] }
+gltf = { version = "1.4.1", default-features = false, features = ["import", "utils"] }
+hecs = "0.11.1"
 # Compile out debug/info logs in release builds while keeping them in debug builds.
 # (debug_assertions is enabled for dev/profile dev builds.)
-tracing = { version = "0.1.41", features = ["max_level_debug", "release_max_level_warn"] }
-tracing-subscriber = "0.3.19"
-vulkano = "0.35.2"
+tracing = { version = "0.1.44", features = ["max_level_debug", "release_max_level_warn"] }
+tracing-subscriber = "0.3.23"
+vulkano = { version = "0.35.2", default-features = false, features = ["macros"] }
 vulkano-shaders = "0.35.0"
-winit = "0.30.12"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30.13", default-features = false, features = ["wayland", "rwh_06", "sctk-adwaita"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+
+[build-dependencies]
+vulkano = { version = "0.35.2", default-features = false, features = ["macros"] }
+bytemuck = { version = "1.25", features = ["extern_crate_alloc", "aarch64_simd", "wasm_simd"] }
+smallvec = { version = "1.16", features = ["const_generics", "const_new", "union"] }
